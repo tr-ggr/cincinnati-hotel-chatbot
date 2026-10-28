@@ -1,0 +1,23 @@
+{
+  "name": "cincinnati-hotel-chatbot",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.22.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "pnpm -r --parallel dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "pnpm -r lint",
+    "smoke": "bash infra/scripts/smoke.sh",
+    "sample:pdf": "tsx docs/sample/generate-sample-pdf.ts"
+  },
+  "devDependencies": {
+    "@types/pdfkit": "^0.17.7",
+    "pdfkit": "^0.20.2",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}

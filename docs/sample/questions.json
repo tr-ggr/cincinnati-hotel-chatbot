@@ -1,0 +1,12 @@
+[
+  { "question": "What time is check-in?", "answered": true, "category": "Pricing & Booking" },
+  { "question": "What are the rooftop pool hours?", "answered": true, "category": "Amenities & Facilities" },
+  { "question": "Are pets allowed?", "answered": true, "category": "Policies" },
+  { "question": "How much is the Riverside Suite per night?", "answered": true, "category": "Rooms" },
+  { "question": "What time is breakfast served?", "answered": true, "category": "Restaurant & Dining" },
+  { "question": "How many people can the Ohio Ballroom hold?", "answered": true, "category": "Events" },
+  { "question": "Is there a helipad on the roof?", "answered": false, "category": "Other" },
+  { "question": "Does the hotel have a casino?", "answered": false, "category": "Amenities & Facilities" },
+  { "question": "Can I rent skis at the hotel?", "answered": false, "category": "Amenities & Facilities" },
+  { "question": "What is the name of the CEO?", "answered": false, "category": "Other" }
+]

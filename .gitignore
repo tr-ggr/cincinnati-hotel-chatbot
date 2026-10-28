@@ -1,0 +1,13 @@
+node_modules/
+dist/
+build/
+.env
+.env.*
+!.env.example
+uploads/
+n8n/credentials.json
+coverage/
+playwright-report/
+test-results/
+.DS_Store
+*.log
