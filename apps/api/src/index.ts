@@ -1,11 +1,14 @@
+import { randomUUID } from 'node:crypto';
 import { mkdir } from 'node:fs/promises';
 import Fastify, { type FastifyError, type FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
 import multipart from '@fastify/multipart';
+import rateLimit from '@fastify/rate-limit';
 import { ZodError } from 'zod';
-import { ConfigError, loadConfig, type Config } from './config.js';
+import { ConfigError, loadConfig, RATE_LIMIT_MAX, type Config } from './config.js';
 import { closePool, getPool } from './db/pool.js';
 import { createN8nClient, N8nError } from './lib/n8n.js';
+import { closeAllSse } from './lib/sse.js';
 import { adminRoutes } from './routes/admin.js';
 import { healthRoutes } from './routes/health.js';
 import { internalRoutes } from './routes/internal.js';
@@ -22,12 +25,45 @@ function toUpperSnake(s: string): string {
     .toUpperCase();
 }
 
+/** Incoming `x-request-id` values are reused only if they look like a plain token (no log/header injection). */
+const REQUEST_ID_RE = /^[A-Za-z0-9._:-]{1,128}$/;
+
+/**
+ * Proxies we trust for X-Forwarded-For: loopback + private ranges (10/8, 172.16/12, 192.168/16, fc00::/7,
+ * link-local). Inside Docker the only hops are nginx (web) and, in prod, cloudflared — both on the private
+ * compose network. proxy-addr walks XFF right-to-left and stops at the first non-trusted (public) address,
+ * so a client-supplied XFF prefix cannot spoof request.ip once a public hop is in the chain.
+ */
+const TRUSTED_PROXIES = ['loopback', 'linklocal', 'uniquelocal'];
+
+const SHUTDOWN_TIMEOUT_MS = 10_000;
+
+const LOG_REDACT_PATHS = [
+  'req.headers["x-hotel-secret"]',
+  'req.headers.authorization',
+  'req.headers.cookie',
+  'res.headers["set-cookie"]',
+];
+
 export async function buildApp(config: Config): Promise<FastifyInstance> {
+  const redact = { paths: LOG_REDACT_PATHS, censor: '[REDACTED]' };
   const app = Fastify({
     logger:
       config.nodeEnv === 'development'
-        ? { level: 'info', transport: { target: 'pino-pretty', options: { colorize: true } } }
-        : { level: 'info' },
+        ? { level: 'info', redact, transport: { target: 'pino-pretty', options: { colorize: true } } }
+        : { level: 'info', redact },
+    trustProxy: TRUSTED_PROXIES,
+    requestIdHeader: false,
+    requestIdLogLabel: 'reqId',
+    genReqId: (req) => {
+      const given = req.headers['x-request-id'];
+      return typeof given === 'string' && REQUEST_ID_RE.test(given) ? given : randomUUID();
+    },
+  });
+
+  // Echo the request id so clients / nginx logs can correlate (also carried onto hijacked SSE replies).
+  app.addHook('onRequest', async (request, reply) => {
+    reply.header('x-request-id', request.id);
   });
 
   app.setErrorHandler((err: FastifyError | Error, request, reply) => {
@@ -40,6 +76,9 @@ export async function buildApp(config: Config): Promise<FastifyInstance> {
       return reply
         .code(502)
         .send({ error: { code: 'ASSISTANT_UNAVAILABLE', message: 'The assistant is temporarily unavailable.' } });
+    }
+    if (e.statusCode === 429) {
+      return reply.code(429).send({ error: { code: 'RATE_LIMITED', message: err.message } });
     }
     if (e.code === 'FST_REQ_FILE_TOO_LARGE' || e.code === 'FST_ERR_CTP_BODY_TOO_LARGE') {
       return reply
@@ -60,12 +99,36 @@ export async function buildApp(config: Config): Promise<FastifyInstance> {
 
   await mkdir(config.uploadDir, { recursive: true });
   getPool(config.databaseUrl);
-  app.addHook('onClose', closePool);
+  // Graceful shutdown: end open SSE streams first (otherwise server.close() waits on them forever),
+  // then onClose releases the pg pool.
+  app.addHook('preClose', async () => {
+    const n = closeAllSse();
+    if (n > 0) app.log.info({ streams: n }, 'closed SSE streams');
+  });
+  app.addHook('onClose', async () => {
+    await closePool();
+    app.log.info('db pool closed');
+  });
 
   const n8n = createN8nClient(config);
   const deps = { config, n8n };
 
   await app.register(cors, { origin: true });
+  // Global 60/min/IP. Per-route overrides: upload 10/min (admin.ts); health, stats stream and
+  // /internal/* opt out with `config: { rateLimit: false }`.
+  await app.register(rateLimit, {
+    global: true,
+    max: RATE_LIMIT_MAX,
+    timeWindow: '1 minute',
+    errorResponseBuilder: (_request, context) =>
+      Object.assign(new Error(`Too many requests. Please retry in ${context.after}.`), {
+        statusCode: 429,
+        code: 'RATE_LIMITED',
+      }),
+    onExceeded: (request) => {
+      request.log.warn({ ip: request.ip, url: request.url }, 'rate limit exceeded');
+    },
+  });
   await app.register(multipart, {
     limits: { fileSize: config.maxUploadBytes, files: 1 },
   });
@@ -97,8 +160,14 @@ async function main(): Promise<void> {
     if (shuttingDown) return;
     shuttingDown = true;
     app.log.info({ signal }, 'shutting down');
+    // Last resort if something (a slow n8n call, a stuck socket) keeps close() pending.
+    setTimeout(() => {
+      app.log.error('shutdown timed out after 10 s; forcing exit');
+      process.exit(1);
+    }, SHUTDOWN_TIMEOUT_MS).unref();
     try {
       await app.close();
+      app.log.info('shutdown complete');
       process.exit(0);
     } catch (err) {
       app.log.error({ err }, 'error during shutdown');

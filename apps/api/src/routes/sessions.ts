@@ -60,17 +60,29 @@ export const registerSessionRoutes: FastifyPluginAsync<RouteDeps> = async (app, 
 
   app.post('/api/sessions/:id/messages', async (request, reply) => {
     const { id } = paramsSchema.parse(request.params);
+    const started = performance.now();
+    // One summary line per chat message: outcome + latency + question length only (never the content).
+    const logChat = (outcome: string, extra: Record<string, unknown> = {}) =>
+      request.log.info(
+        { event: 'chat', outcome, sessionId: id, latencyMs: Math.round(performance.now() - started), ...extra },
+        'chat ' + outcome,
+      );
 
     // 1. validate body, load session, load active ready document
     const body = messageBodySchema.safeParse(request.body ?? {});
     if (!body.success) {
+      logChat('validation_error');
       return sendError(reply, 400, 'VALIDATION_ERROR', summarizeIssues(body.error));
     }
-    if (!UUID_RE.test(id)) return sendError(reply, 404, 'SESSION_NOT_FOUND', 'Session not found');
-    const session = await getSession(id);
-    if (!session) return sendError(reply, 404, 'SESSION_NOT_FOUND', 'Session not found');
+    const questionLength = body.data.content.length;
+    const session = UUID_RE.test(id) ? await getSession(id) : null;
+    if (!session) {
+      logChat('session_not_found', { questionLength });
+      return sendError(reply, 404, 'SESSION_NOT_FOUND', 'Session not found');
+    }
     const doc = await getActiveDocument();
     if (!doc || doc.status !== 'ready') {
+      logChat('no_document', { questionLength });
       return sendError(reply, 409, 'NO_DOCUMENT', 'No document is available yet. Please try again later.');
     }
 
@@ -82,7 +94,7 @@ export const registerSessionRoutes: FastifyPluginAsync<RouteDeps> = async (app, 
       role: m.role,
       content: m.content,
     }));
-    const started = performance.now();
+    const n8nStarted = performance.now();
     let result: Awaited<ReturnType<N8nClient['chat']>>;
     try {
       result = await n8n.chat({
@@ -97,9 +109,14 @@ export const registerSessionRoutes: FastifyPluginAsync<RouteDeps> = async (app, 
       request.log.warn({ err }, 'n8n chat failed');
       await touchSession(id);
       emitStatsChanged();
+      logChat('assistant_unavailable', {
+        questionLength,
+        messageId: userRow.id,
+        n8nLatencyMs: Math.round(performance.now() - n8nStarted),
+      });
       return sendError(reply, 502, 'ASSISTANT_UNAVAILABLE', 'The assistant is unavailable. Please try again.');
     }
-    const latencyMs = Math.round(performance.now() - started);
+    const latencyMs = Math.round(performance.now() - n8nStarted);
 
     // 4. success
     const category = isCategory(result.category) ? result.category : 'Other';
@@ -120,6 +137,14 @@ export const registerSessionRoutes: FastifyPluginAsync<RouteDeps> = async (app, 
     });
     await touchSession(id);
     emitStatsChanged();
+    logChat(answered ? 'answered' : 'unanswered', {
+      questionLength,
+      messageId: userRow.id,
+      category,
+      n8nLatencyMs: latencyMs,
+      sources: result.sources.length,
+      model: result.model,
+    });
 
     return reply.code(200).send({
       userMessage: toMessageDto(updatedUser),

@@ -1,5 +1,9 @@
 import { z } from 'zod';
 
+/** Rate limits per client IP per 1-minute window (ARCHITECTURE §4). Upload is stricter: each one runs a full ingest. */
+export const RATE_LIMIT_MAX = 60;
+export const UPLOAD_RATE_LIMIT_MAX = 10;
+
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),

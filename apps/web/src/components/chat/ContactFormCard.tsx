@@ -69,7 +69,7 @@ export function ContactFormCard({ sessionId, question, done, onDone, onDismiss }
       });
       onDone();
     } catch (err) {
-      setApiError(isApiError(err) ? err.message : 'Something went wrong. Please try again.');
+      setApiError(isApiError(err) && err.code === 'RATE_LIMITED' ? "You're sending messages too quickly — please wait a moment and try again." : isApiError(err) ? err.message : 'Something went wrong. Please try again.');
       setSubmitting(false);
     }
   };

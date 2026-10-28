@@ -38,36 +38,59 @@ export function useStatsStream(): UseStatsStream {
     let timer: ReturnType<typeof setInterval> | null = null;
     let failures = 0;
 
-    const startPolling = () => {
-      if (timer) return;
-      setMode('polling');
-      void refresh();
-      timer = setInterval(() => void refresh(), POLL_INTERVAL_MS);
-    };
-
-    if (typeof EventSource === 'undefined') {
-      startPolling();
-    } else {
-      es = new EventSource(STATS_STREAM_URL);
-      es.addEventListener('stats', (ev) => {
+    const open = () => {
+      const source = new EventSource(STATS_STREAM_URL);
+      es = source;
+      source.addEventListener('stats', (ev) => {
+        if (es !== source) return;
         try {
           setStats(JSON.parse((ev as MessageEvent<string>).data) as StatsSnapshot);
           setError(null);
           failures = 0;
+          if (timer) {
+            clearInterval(timer);
+            timer = null;
+          }
           setMode('live');
         } catch {
           // ignore malformed event
         }
       });
-      es.addEventListener('error', () => {
-        if (!es || es.readyState === EventSource.OPEN) return;
+      source.addEventListener('error', () => {
+        if (es !== source) return;
+        if (timer) {
+          // Recovery probe while polling failed: give up until the next poll tick.
+          source.close();
+          es = null;
+          return;
+        }
+        if (source.readyState === EventSource.OPEN) return;
         failures += 1;
         if (failures >= MAX_FAILED_RECONNECTS) {
-          es.close();
+          source.close();
           es = null;
           startPolling();
         }
       });
+    };
+
+    const startPolling = () => {
+      if (timer) return;
+      setMode('polling');
+      void refresh();
+      timer = setInterval(() => {
+        void refresh().then(() => {
+          // Try to recover SSE: at most one reopen attempt per tick.
+          if (!aliveRef.current || !timer || es || typeof EventSource === 'undefined') return;
+          open();
+        });
+      }, POLL_INTERVAL_MS);
+    };
+
+    if (typeof EventSource === 'undefined') {
+      startPolling();
+    } else {
+      open();
     }
 
     return () => {

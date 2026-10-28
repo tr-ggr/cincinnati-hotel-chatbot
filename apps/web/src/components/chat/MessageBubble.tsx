@@ -62,9 +62,13 @@ export function MessageBubble({ message, showCategory = true, onRetry, retryDisa
         {failed && message.failure === 'no-document' && (
           <p className="text-xs text-red-700">Not sent: the knowledge base is not available yet.</p>
         )}
-        {failed && message.failure === 'unavailable' && (
+        {failed && (message.failure === 'unavailable' || message.failure === 'rate-limited') && (
           <div className="flex flex-wrap items-center justify-end gap-1 text-xs text-red-700">
-            <span>{"Couldn't reach the assistant —"}</span>
+            <span>
+              {message.failure === 'rate-limited'
+                ? "You're sending messages too quickly — please wait a moment and try again."
+                : "Couldn't reach the assistant —"}
+            </span>
             <Button
               variant="ghost"
               size="sm"

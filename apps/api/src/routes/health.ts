@@ -4,7 +4,9 @@ import { getActiveDocument } from '../db/queries.js';
 import type { RouteDeps } from './sessions.js';
 
 export const healthRoutes: FastifyPluginAsync<RouteDeps> = async (app, { config }) => {
-  app.get('/api/health', async () => {
+  // Exempt from rate limiting (container healthcheck + uptime monitors) and logged at warn+ only, so the
+  // 10 s docker healthcheck does not flood the request log.
+  app.get('/api/health', { config: { rateLimit: false }, logLevel: 'warn' }, async () => {
     let db: 'up' | 'down' = 'down';
     let activeDocument = false;
     try {

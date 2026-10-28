@@ -13,8 +13,9 @@ import {
   toDocumentInfo,
 } from '../db/queries.js';
 import { emitStatsChanged, onStatsChanged } from '../lib/events.js';
-import { openSse } from '../lib/sse.js';
+import { openSse, openSseCount } from '../lib/sse.js';
 import { getStats } from '../lib/stats.js';
+import { UPLOAD_RATE_LIMIT_MAX } from '../config.js';
 import type { RouteDeps } from './sessions.js';
 
 const MIN_TEXT_CHARS = 200;
@@ -61,12 +62,25 @@ export const adminRoutes: FastifyPluginAsync<RouteDeps> = async (app, { config, 
     return { document: doc ? toDocumentInfo(doc) : null };
   });
 
-  app.post('/api/admin/document', async (request, reply) => {
+  // Each upload runs a full ingest (embeddings), so it gets a stricter per-IP limit than the global 60/min.
+  const uploadRouteOpts = { config: { rateLimit: { max: UPLOAD_RATE_LIMIT_MAX, timeWindow: '1 minute' } } };
+
+  app.post('/api/admin/document', uploadRouteOpts, async (request, reply) => {
+    const started = performance.now();
+    // One summary line per upload: outcome + latency (no file contents).
+    const logUpload = (outcome: string, extra: Record<string, unknown> = {}) =>
+      request.log.info(
+        { event: 'upload', outcome, latencyMs: Math.round(performance.now() - started), ...extra },
+        'upload ' + outcome,
+      );
+
     if (!request.isMultipart()) {
+      logUpload('invalid_pdf');
       return fail(reply, 422, 'INVALID_PDF', 'Expected a multipart/form-data upload with a "file" field.');
     }
     const upload = await request.file();
     if (!upload || upload.fieldname !== 'file') {
+      logUpload('invalid_pdf');
       return fail(reply, 422, 'INVALID_PDF', 'Missing "file" field.');
     }
 
@@ -82,11 +96,13 @@ export const adminRoutes: FastifyPluginAsync<RouteDeps> = async (app, { config, 
     }
     if (upload.file.truncated) {
       await rmQuiet(file);
+      logUpload('file_too_large');
       return fail(reply, 413, 'FILE_TOO_LARGE', `File exceeds the ${config.maxUploadMb} MB limit.`);
     }
 
     if (!(await hasPdfMagic(file))) {
       await rmQuiet(file);
+      logUpload('invalid_pdf', { sizeBytes: upload.file.bytesRead });
       return fail(reply, 422, 'INVALID_PDF', 'The uploaded file is not a PDF.');
     }
 
@@ -96,10 +112,12 @@ export const adminRoutes: FastifyPluginAsync<RouteDeps> = async (app, { config, 
     } catch (err) {
       request.log.warn({ err }, 'pdf parse failed');
       await rmQuiet(file);
+      logUpload('invalid_pdf', { sizeBytes: upload.file.bytesRead });
       return fail(reply, 422, 'INVALID_PDF', 'The PDF could not be read.');
     }
     if (parsed.chars < MIN_TEXT_CHARS) {
       await rmQuiet(file);
+      logUpload('empty_pdf', { sizeBytes: upload.file.bytesRead, pageCount: parsed.pages });
       return fail(reply, 422, 'EMPTY_PDF', 'The PDF contains no extractable text (scanned or empty).');
     }
 
@@ -114,6 +132,13 @@ export const adminRoutes: FastifyPluginAsync<RouteDeps> = async (app, { config, 
       const { document, previous } = await activateDocument(row.id, res.chunk_count);
       if (previous) await rmQuiet(path.resolve(config.uploadDir, `${previous.id}.pdf`)).catch(() => undefined);
       emitStatsChanged();
+      logUpload('ready', {
+        documentId: id,
+        sizeBytes: document.sizeBytes,
+        pageCount: document.pageCount,
+        chunkCount: document.chunkCount,
+        replacedDocumentId: previous?.id ?? null,
+      });
       return { document: toDocumentInfo(document) };
     } catch (err) {
       request.log.error({ err }, 'ingest failed');
@@ -121,15 +146,25 @@ export const adminRoutes: FastifyPluginAsync<RouteDeps> = async (app, { config, 
       await failDocument(id, message).catch(() => undefined);
       await rmQuiet(file).catch(() => undefined);
       emitStatsChanged();
+      logUpload('ingest_failed', { documentId: id });
       return fail(reply, 502, 'INGEST_FAILED', 'Failed to process the document. Please try again.');
     }
   });
 
   app.get('/api/admin/stats', async () => getStats());
 
-  app.get('/api/admin/stats/stream', async (request, reply) => {
+  // Long-lived stream: exempt from rate limiting (EventSource reconnects must never be refused).
+  app.get('/api/admin/stats/stream', { config: { rateLimit: false } }, async (request, reply) => {
     let unsubscribe: () => void = () => undefined;
-    const sse = openSse(reply, () => unsubscribe());
+    const opened = performance.now();
+    const sse = openSse(reply, () => {
+      unsubscribe();
+      request.log.info(
+        { event: 'sse', outcome: 'closed', durationMs: Math.round(performance.now() - opened), open: openSseCount() },
+        'stats stream closed',
+      );
+    });
+    request.log.info({ event: 'sse', outcome: 'opened', open: openSseCount() }, 'stats stream opened');
     try {
       sse.send('stats', await getStats());
     } catch (err) {

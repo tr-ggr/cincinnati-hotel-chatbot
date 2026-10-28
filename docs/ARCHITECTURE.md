@@ -220,9 +220,9 @@ Notes
 
 ## §4 API contract
 
-Base `/api`. JSON everywhere except upload. Errors: `{ "error": { "code": "UPPER_SNAKE", "message": "..." } }`. CORS open (same-origin via nginx in prod anyway). Rate limit 60 req/min/IP is planned under S4-01 and is not yet registered in `apps/api/src/index.ts`.
+Base `/api`. JSON everywhere except upload. Errors: `{ "error": { "code": "UPPER_SNAKE", "message": "..." } }`. CORS open (same-origin via nginx in prod anyway). Rate limit: 60 req/min per client IP (429 RATE_LIMITED, Retry-After header); POST /api/admin/document 10/min; exempt: /api/health, /api/admin/stats/stream, /internal/*. Client IP comes from X-Forwarded-For via Fastify trustProxy (loopback + private ranges). Every response carries x-request-id.
 
-Additional error codes the code returns and the UI handles (not in the lists below): `VALIDATION_ERROR` (400, zod or Fastify validation), `FILE_TOO_LARGE` (413, upload over `MAX_UPLOAD_MB`), `UNAUTHORIZED` (401, `/internal/*` without the secret), `NOT_FOUND` (404, unknown route).
+Additional error codes the code returns and the UI handles (not in the lists below): `VALIDATION_ERROR` (400, zod or Fastify validation), `FILE_TOO_LARGE` (413, upload over `MAX_UPLOAD_MB`), `UNAUTHORIZED` (401, `/internal/*` without the secret), `NOT_FOUND` (404, unknown route), `RATE_LIMITED` (429, over the rate limit).
 
 ```
 GET  /api/health
@@ -263,6 +263,7 @@ GET  /api/admin/stats
                           activeDocument: {...}|null, generatedAt: iso }
 
 GET  /api/admin/stats/stream      Content-Type: text/event-stream
+  retry: 3000                                          (first line of the stream)
   event: stats        data: <StatsSnapshot JSON>     (immediately on connect, then on every 'stats:changed')
   : ping                                              (comment heartbeat every 20 s)
   headers: Cache-Control: no-cache · X-Accel-Buffering: no · Connection: keep-alive

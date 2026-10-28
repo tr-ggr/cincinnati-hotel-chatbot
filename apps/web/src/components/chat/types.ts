@@ -14,7 +14,7 @@ export interface ChatMessage {
   /** User messages only. */
   status?: SendStatus;
   /** Why a user message failed. */
-  failure?: 'no-document' | 'unavailable';
+  failure?: 'no-document' | 'unavailable' | 'rate-limited';
 }
 
 export type FormState = 'open' | 'done' | 'dismissed';

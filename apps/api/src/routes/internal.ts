@@ -16,28 +16,33 @@ function secretMatches(given: unknown, expected: string): boolean {
 }
 
 export const internalRoutes: FastifyPluginAsync<RouteDeps> = async (app, { config }) => {
-  app.get<{ Params: { id: string } }>('/internal/documents/:id/file', async (request, reply) => {
-    if (!secretMatches(request.headers['x-hotel-secret'], config.n8nWebhookSecret)) {
+  // n8n-only (secret-protected, never proxied by nginx) -> no rate limit.
+  app.get<{ Params: { id: string } }>(
+    '/internal/documents/:id/file',
+    { config: { rateLimit: false } },
+    async (request, reply) => {
+      if (!secretMatches(request.headers['x-hotel-secret'], config.n8nWebhookSecret)) {
+        return reply
+          .code(401)
+          .send({ error: { code: 'UNAUTHORIZED', message: 'Missing or invalid x-hotel-secret header.' } });
+      }
+      const { id } = request.params;
+      const notFound = () => reply.code(404).send({ error: { code: 'NOT_FOUND', message: 'Document file not found.' } });
+      if (!UUID_RE.test(id)) return notFound();
+      const doc = await getDocument(id);
+      if (!doc) return notFound();
+      const file = path.resolve(config.uploadDir, `${id}.pdf`);
+      let size: number;
+      try {
+        size = (await stat(file)).size;
+      } catch {
+        return notFound();
+      }
       return reply
-        .code(401)
-        .send({ error: { code: 'UNAUTHORIZED', message: 'Missing or invalid x-hotel-secret header.' } });
-    }
-    const { id } = request.params;
-    const notFound = () => reply.code(404).send({ error: { code: 'NOT_FOUND', message: 'Document file not found.' } });
-    if (!UUID_RE.test(id)) return notFound();
-    const doc = await getDocument(id);
-    if (!doc) return notFound();
-    const file = path.resolve(config.uploadDir, `${id}.pdf`);
-    let size: number;
-    try {
-      size = (await stat(file)).size;
-    } catch {
-      return notFound();
-    }
-    return reply
-      .type('application/pdf')
-      .header('Content-Length', size)
-      .header('Content-Disposition', 'attachment')
-      .send(createReadStream(file));
-  });
+        .type('application/pdf')
+        .header('Content-Length', size)
+        .header('Content-Disposition', 'attachment')
+        .send(createReadStream(file));
+    },
+  );
 };

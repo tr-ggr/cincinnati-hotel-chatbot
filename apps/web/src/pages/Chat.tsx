@@ -169,6 +169,8 @@ export default function Chat() {
         if (isApiError(e) && e.code === 'NO_DOCUMENT') {
           setNoDocument(true);
           patchMessage(key, { status: 'failed', failure: 'no-document' });
+        } else if (isApiError(e) && e.code === 'RATE_LIMITED') {
+          patchMessage(key, { status: 'failed', failure: 'rate-limited' });
         } else {
           patchMessage(key, { status: 'failed', failure: 'unavailable' });
         }
