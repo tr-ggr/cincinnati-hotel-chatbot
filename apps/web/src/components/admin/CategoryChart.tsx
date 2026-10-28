@@ -1,4 +1,5 @@
 import { Bar, BarChart, LabelList, ResponsiveContainer, XAxis, YAxis } from 'recharts';
+import { BarChart3 } from 'lucide-react';
 import { Card, Skeleton } from '../ui';
 import type { CategoryCount } from '../../lib/api';
 import { CATEGORIES } from '../../lib/categories';
@@ -22,10 +23,15 @@ export function CategoryChart({ data, totalQuestions }: CategoryChartProps) {
     <Card>
       <div className="flex items-baseline justify-between gap-2">
         <h2 className="text-base font-semibold text-ink">Questions by category</h2>
-        {rows && totalQuestions === 0 && <span className="text-sm text-muted">No questions yet</span>}
       </div>
       <div className="mt-4" style={{ height: CATEGORIES.length * ROW_H }}>
-        {rows === null ? (
+        {rows !== null && totalQuestions === 0 ? (
+          <div className="flex size-full flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-line bg-sunken/50 text-center">
+            <BarChart3 className="size-7 text-muted" aria-hidden="true" />
+            <p className="text-sm font-medium text-ink-soft">No questions yet</p>
+            <p className="max-w-xs px-4 text-xs text-muted">Categories will appear here as guests start chatting.</p>
+          </div>
+        ) : rows === null ? (
           <div className="space-y-2.5" aria-hidden="true">
             {CATEGORIES.map((c) => (
               <Skeleton key={c} className="h-6 w-full" />

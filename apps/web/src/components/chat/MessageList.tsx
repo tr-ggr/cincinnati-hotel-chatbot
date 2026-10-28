@@ -19,7 +19,8 @@ export function MessageList({ messages, pending, sessionId, offers, onOfferChang
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    endRef.current?.scrollIntoView({ block: 'end' });
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    endRef.current?.scrollIntoView({ block: 'end', behavior: reduce ? 'auto' : 'smooth' });
   }, [messages, pending, offers]);
 
   return (
@@ -33,7 +34,7 @@ export function MessageList({ messages, pending, sessionId, offers, onOfferChang
         {messages.map((m) => {
           const offer = offers[m.key];
           return (
-            <div key={m.key} className="flex flex-col gap-3">
+            <div key={m.key} className="animate-bubble-in flex flex-col gap-3">
               <MessageBubble message={m} onRetry={onRetry} retryDisabled={pending} />
               {offer && offer.state !== 'dismissed' && sessionId && (
                 <div className="space-y-2 pl-10">

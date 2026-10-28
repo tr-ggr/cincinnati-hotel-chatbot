@@ -19,3 +19,17 @@ n8n needs `N8N_WEBHOOK_URL` and `N8N_PROXY_HOPS=1` behind the tunnel (already se
 Run one ngrok agent with two tunnels (`web` -> `localhost:8080`, `n8n` -> `localhost:5678`), or two `ngrok http` processes
 (`ngrok http 8080` and `ngrok http 5678`). Then set `N8N_HOST`, `N8N_WEBHOOK_URL` and `N8N_EDITOR_BASE_URL` for n8n
 to the ngrok n8n hostname (e.g. via an extra compose override file) and restart n8n. Do not use `--profile tunnel`.
+
+Note: `infra/docker-compose.yml` publishes no host ports, so ngrok on the host cannot reach `web` or `n8n` until you add a
+small override that maps them (`infra/compose.ngrok.yml`, not committed; `deploy.sh --no-tunnel` alone is not enough):
+
+```yaml
+services:
+  web:
+    ports: ["8080:80"]
+  n8n:
+    ports: ["5678:5678"]
+```
+
+Start with `docker compose --env-file .env -f infra/docker-compose.yml -f infra/compose.ngrok.yml up -d --build`.
+Alternatively, run ngrok as a compose service on the same network and point it at `web:80` and `n8n:5678`.

@@ -20,6 +20,24 @@ const markdownComponents: Components = {
   code: ({ node: _n, ...props }) => <code className="rounded bg-sunken px-1 py-0.5 text-[0.9em]" {...props} />,
 };
 
+function Timestamp({ iso, className }: { iso?: string; className?: string }) {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return (
+    <time
+      dateTime={iso}
+      title={d.toLocaleString()}
+      className={cn(
+        'text-[11px] text-muted opacity-0 transition-opacity group-hover/msg:opacity-100 group-focus-within/msg:opacity-100 pointer-coarse:opacity-100',
+        className,
+      )}
+    >
+      {d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+    </time>
+  );
+}
+
 export interface MessageBubbleProps {
   message: ChatMessage;
   showCategory?: boolean;
@@ -31,7 +49,7 @@ export function MessageBubble({ message, showCategory = true, onRetry, retryDisa
   if (message.role === 'user') {
     const failed = message.status === 'failed';
     return (
-      <div className="flex flex-col items-end gap-1">
+      <div className="group/msg flex flex-col items-end gap-1">
         <div
           className={cn(
             'max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-accent px-4 py-2.5 text-base text-white shadow-sm',
@@ -40,6 +58,7 @@ export function MessageBubble({ message, showCategory = true, onRetry, retryDisa
         >
           {message.content}
         </div>
+        {!failed && <Timestamp iso={message.createdAt} className="mr-1" />}
         {failed && message.failure === 'no-document' && (
           <p className="text-xs text-red-700">Not sent: the knowledge base is not available yet.</p>
         )}
@@ -64,17 +83,20 @@ export function MessageBubble({ message, showCategory = true, onRetry, retryDisa
   }
 
   return (
-    <div className="flex items-end gap-2">
+    <div className="group/msg flex items-end gap-2">
       <Avatar />
       <div className="flex min-w-0 max-w-[85%] flex-col items-start gap-1.5">
         <div className="break-words rounded-2xl rounded-bl-md border border-line bg-surface px-4 py-2.5 text-base text-ink shadow-sm">
           <ReactMarkdown components={markdownComponents}>{message.content}</ReactMarkdown>
         </div>
-        {showCategory && message.category && (
-          <Badge tone="neutral" className="ml-1 text-[11px] font-normal text-muted">
-            {message.category}
-          </Badge>
-        )}
+        <div className="ml-1 flex items-center gap-2">
+          {showCategory && message.category && (
+            <Badge tone="neutral" className="text-[11px] font-normal text-muted">
+              {message.category}
+            </Badge>
+          )}
+          <Timestamp iso={message.createdAt} />
+        </div>
       </div>
     </div>
   );

@@ -14,8 +14,8 @@ workflows, compose topology and prompts. Sprint cards reference its sections (§
 
 ## Commands
 - Install: `pnpm install` (pnpm 11; Node ≥ 22 locally, node:22-alpine in containers)
-- Dev stack: `docker compose -f infra/docker-compose.yml up -d postgres n8n` then `pnpm dev` (api :3000, web :5173)
-- Full stack: `docker compose -f infra/docker-compose.yml up -d --build` → web http://localhost:8080, n8n http://localhost:5678
+- Dev stack: `docker compose --env-file .env -f infra/docker-compose.yml up -d postgres n8n` then `pnpm dev` (api :3000, web :5173)
+- Full stack: `docker compose --env-file .env -f infra/docker-compose.yml up -d --build` → web http://localhost:8080, n8n http://localhost:5678
   (`infra/compose.override.yml` is auto-merged locally and exposes ports; deploy uses `-f docker-compose.yml` only)
 - Typecheck / build: `pnpm typecheck`, `pnpm build`
 - Smoke test: `bash infra/scripts/smoke.sh --base http://localhost:8080 [--mock] [--only upload,chat,lead,stats,sse]`
@@ -33,7 +33,7 @@ workflows, compose topology and prompts. Sprint cards reference its sections (§
 - Errors: `{ error: { code, message } }`. Codes are UPPER_SNAKE (`NO_DOCUMENT`, `ASSISTANT_UNAVAILABLE`, `INVALID_PDF`, `EMPTY_PDF`, `INGEST_FAILED`).
 - Secrets only in `.env` (never committed). `n8n/credentials.template.json` uses `${VAR}` placeholders filled by envsubst at import time.
 - n8n workflow JSON in `n8n/workflows/` is the source of truth. After editing in the UI, re-export:
-  `docker compose -f infra/docker-compose.yml exec n8n n8n export:workflow --all --separate --output=/import/workflows`
+  `docker compose --env-file .env -f infra/docker-compose.yml exec n8n n8n export:workflow --all --separate --output=/import/workflows`
 - Never float `n8nio/n8n:latest`; `N8N_VERSION` is pinned in `.env(.example)`.
 - Keep the UI dependency-light: Tailwind v4, lucide-react, recharts, react-markdown, clsx. No shadcn, no state libraries.
 - Ports: web 8080 (nginx) / 5173 (vite), api 3000, n8n 5678, postgres 5432 (api/postgres host ports overridable via API_HOST_PORT / POSTGRES_HOST_PORT).

@@ -1,5 +1,6 @@
+import { z } from 'zod';
 import type { Config } from '../config.js';
-import { CANNED_FALLBACK, type Category } from './categories.js';
+import { CANNED_FALLBACK, isCategory, type Category } from './categories.js';
 
 export interface N8nClient {
   ingest(input: { document_id: string; filename: string; file_url: string }): Promise<{ ok: true; document_id: string; chunk_count: number }>;
@@ -9,7 +10,14 @@ export interface N8nClient {
     : Promise<{ ok: true; email_id: string | null; summary: string | null }>;
 }
 
-export type N8nErrorCode = 'NOT_IMPLEMENTED' | 'TIMEOUT' | 'UNAVAILABLE' | 'BAD_RESPONSE';
+export type N8nErrorCode =
+  | 'NOT_IMPLEMENTED'
+  | 'TIMEOUT'
+  | 'UNAVAILABLE'
+  | 'BAD_RESPONSE'
+  | 'INGEST_FAILED'
+  | 'ASSISTANT_UNAVAILABLE'
+  | 'LEAD_EMAIL_FAILED';
 
 export class N8nError extends Error {
   readonly code: N8nErrorCode;
@@ -59,22 +67,98 @@ export function createMockN8nClient(): N8nClient {
   };
 }
 
-function notImplemented(): never {
-  throw new N8nError('NOT_IMPLEMENTED', 'n8n HTTP client not implemented yet (S2-04); set N8N_MOCK=1');
+const ingestSchema = z.object({
+  ok: z.literal(true),
+  document_id: z.string().min(1),
+  chunk_count: z.coerce.number().int().positive(),
+});
+
+const chatSchema = z.object({
+  answer: z.string(),
+  category: z.unknown().transform((v): Category => (isCategory(v) ? v : 'Other')),
+  answered: z.boolean(),
+  sources: z
+    .array(z.object({ chunk_index: z.coerce.number(), score: z.coerce.number() }))
+    .nullish()
+    .transform((v) => v ?? []),
+  model: z
+    .string()
+    .nullish()
+    .transform((v) => v || 'gpt-4.1-mini'),
+});
+
+const leadSchema = z.object({
+  ok: z.literal(true),
+  email_id: z.string().nullish().transform((v) => v ?? null),
+  summary: z.string().nullish().transform((v) => v ?? null),
+});
+
+type Endpoint = 'ingest' | 'chat' | 'lead';
+
+const ENDPOINTS: Record<Endpoint, { code: N8nErrorCode; timeoutMs: number }> = {
+  ingest: { code: 'INGEST_FAILED', timeoutMs: 180_000 },
+  chat: { code: 'ASSISTANT_UNAVAILABLE', timeoutMs: 30_000 },
+  lead: { code: 'LEAD_EMAIL_FAILED', timeoutMs: 30_000 },
+};
+
+function excerpt(text: string): string {
+  return text.replace(/\s+/g, ' ').trim().slice(0, 200);
 }
 
-/** Returns the mock when config.n8nMock, else a stub throwing N8nError('NOT_IMPLEMENTED') (S2-04 replaces it). */
+function createHttpN8nClient(config: Pick<Config, 'n8nBaseUrl' | 'n8nWebhookSecret'>): N8nClient {
+  const base = config.n8nBaseUrl.replace(/\/+$/, '');
+
+  async function call<S extends z.ZodType>(endpoint: Endpoint, body: unknown, schema: S): Promise<z.output<S>> {
+    const { code, timeoutMs } = ENDPOINTS[endpoint];
+    let res: Response;
+    let text: string;
+    try {
+      res = await fetch(`${base}/webhook/hotel/${endpoint}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-hotel-secret': config.n8nWebhookSecret },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      text = await res.text();
+    } catch (err) {
+      const name = err instanceof Error ? err.name : '';
+      if (name === 'TimeoutError' || name === 'AbortError') {
+        throw new N8nError(code, `n8n ${endpoint} timed out after ${timeoutMs} ms`, { cause: err });
+      }
+      const reason = err instanceof Error ? err.message : 'unknown error';
+      throw new N8nError(code, `n8n ${endpoint} request failed: ${reason}`, { cause: err });
+    }
+    if (!res.ok) {
+      throw new N8nError(code, `n8n ${endpoint} returned HTTP ${res.status}: ${excerpt(text)}`);
+    }
+    let json: unknown;
+    try {
+      json = JSON.parse(text);
+    } catch (err) {
+      throw new N8nError(code, `n8n ${endpoint} returned invalid JSON (HTTP ${res.status}): ${excerpt(text)}`, {
+        cause: err,
+      });
+    }
+    const parsed = schema.safeParse(json);
+    if (!parsed.success) {
+      const issues = parsed.error.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`).join('; ');
+      throw new N8nError(
+        code,
+        `n8n ${endpoint} response failed validation (HTTP ${res.status}): ${excerpt(issues)}; body: ${excerpt(text)}`,
+      );
+    }
+    return parsed.data;
+  }
+
+  return {
+    ingest: (input) => call('ingest', input, ingestSchema),
+    chat: (input) => call('chat', input, chatSchema),
+    lead: (input) => call('lead', input, leadSchema),
+  };
+}
+
+/** Returns the mock when config.n8nMock, else the real HTTP client for the n8n webhooks. */
 export function createN8nClient(config: Pick<Config, 'n8nMock' | 'n8nBaseUrl' | 'n8nWebhookSecret'>): N8nClient {
   if (config.n8nMock) return createMockN8nClient();
-  return {
-    async ingest() {
-      return notImplemented();
-    },
-    async chat() {
-      return notImplemented();
-    },
-    async lead() {
-      return notImplemented();
-    },
-  };
+  return createHttpN8nClient(config);
 }

@@ -95,6 +95,8 @@ export const registerSessionRoutes: FastifyPluginAsync<RouteDeps> = async (app, 
     } catch (err) {
       // 5. failure: leave the user message, report 502
       request.log.warn({ err }, 'n8n chat failed');
+      await touchSession(id);
+      emitStatsChanged();
       return sendError(reply, 502, 'ASSISTANT_UNAVAILABLE', 'The assistant is unavailable. Please try again.');
     }
     const latencyMs = Math.round(performance.now() - started);

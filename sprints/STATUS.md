@@ -20,10 +20,10 @@ Maintained by the orchestrator. One row per card. States: `todo` · `running` ·
 | S1-04 | haiku 5.5 | passed | 1 | mock smoke 7/7 PASS |
 | S1 gate | — | passed | 1 | mock smoke PASS, typecheck ok |
 | S2-01 | opus 5.5 | blocked-human | 1 | import ok (4 creds, WF1 published via publish:workflow); ingest needs OPENAI_API_KEY (24 chunks expected) |
-| S2-02 | opus 5.5 | todo | 0 | |
-| S2-03 | sonnet 5.5 | todo | 0 | |
-| S2-04 | sonnet 5.5 | todo | 0 | |
-| S2-05 | haiku 5.5 | todo | 0 | |
+| S2-02 | opus 5.5 | blocked-human | 1 | WF2 imported+published (3 active); verified with fake OpenAI (10/10); score = cosine DISTANCE (lower better); eval needs OPENAI_API_KEY |
+| S2-03 | sonnet 5.5 | blocked-human | 1 | WF3 imported+published; verified e2e with fake OpenAI/Resend; lead-test guard refuses empty/reviewer LEAD_TO; needs RESEND_API_KEY, EMAIL_FROM, LEAD_TO (+OPENAI) |
+| S2-04 | sonnet 5.5 | blocked-human | 1 | real client done; typecheck ok; error paths verified vs live n8n (502s, lead failed); real smoke needs keys; .env stays N8N_MOCK=1 |
+| S2-05 | haiku 5.5 | passed | 1 | 310-line README; score TODO table kept |
 | S2 gate | — | todo | 0 | |
 | S3-01 | sonnet 5.5 | passed | 1 | lib/index + components/ui/index barrels; categories identical |
 | S3-02 | sonnet 5.5 | passed | 1 | verified live at 375px via playwright-cli; bundle 716kB (code-split idea for S4-02) |
@@ -31,11 +31,12 @@ Maintained by the orchestrator. One row per card. States: `todo` · `running` ·
 | S3-04 | haiku 5.5 | passed | 1 | 2/2 specs pass (E2E_BASE_URL=http://[::1]:8080) |
 | S3 gate | — | passed | 1 | e2e 2/2, no console errors, 375+1280px ok, admin 4 cards+chart+Live |
 | S4-01 | opus 5.5 | todo | 0 | |
-| S4-02 | sonnet 5.5 | todo | 0 | droppable |
-| S4-03 | haiku 5.5 | todo | 0 | |
+| S4-02 | sonnet 5.5 | passed | 1 | route code-split (no chunk warning), AA accent #b45309, e2e 2/2, 375/1280 ok |
+| S4-03 | haiku 5.5 | passed | 1 | 4 docs + README; links ok; mermaid added |
+| S4-H1 | haiku 5.5 | passed | 1 | CLAUDE.md --env-file; .env.example comments; 502 emits stats; Dockerfile 127.0.0.1; ngrok note |
 | S4 gate | — | todo | 0 | |
 | S5-01 | human | todo | 0 | |
-| S5-02 | opus 5.5 + human | todo | 0 | |
+| S5-02 | opus 5.5 + human | blocked-human | 1 | deploy.sh written (bash -n ok, preflight dry-runs ok); VPS deploy waits on S0-06 + S5-01 + keys |
 | S5-03 | haiku 5.5 | todo | 0 | |
 | S5-04 | human | todo | 0 | |
 
@@ -54,3 +55,4 @@ _(orchestrator appends dated one-liners here: gate results, escalations, handoff
 - 2026-10-28 S3 gate passed → commit 'S3: web'.
 - 2026-10-28 S2-01: creds use fixed ids cred-*; WF ids hotelIngestPdf01 / hotelChatAnswr02 / hotelLeadEmail03; activation = n8n publish:workflow + restart (update:workflow deprecated on 2.45.5). Downstream verified with fake embeddings (24 chunks, purge ok). Blocked on OPENAI_API_KEY.
 - 2026-10-28 user: "build, update status, commit, push; keys later". Built + committed. Push NOT done: no git remote, and the only gh account is a bee-man-dan account (user said not to use those) → push waits for S5-01 (user creates repo/remote).
+- 2026-10-28 checkpoint commit (user asked to commit everything): S2-02..05 built + verified with fake OpenAI/Resend; S4-02, S4-03, S4-H1 passed; deploy.sh written. Remaining gates (S2, S4-01, S4) need OPENAI/RESEND keys + EMAIL_FROM + LEAD_TO; S5 needs S0-06 + a non-bee-man-dan GitHub remote.

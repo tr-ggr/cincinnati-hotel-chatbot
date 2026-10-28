@@ -9,6 +9,8 @@ export interface ChatMessage {
   content: string;
   category: Category | null;
   answered: boolean | null;
+  /** ISO timestamp, shown on hover. */
+  createdAt?: string;
   /** User messages only. */
   status?: SendStatus;
   /** Why a user message failed. */

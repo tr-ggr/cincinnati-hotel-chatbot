@@ -54,6 +54,7 @@ function fromServer(m: Message): ChatMessage {
     content: m.content,
     category: m.category,
     answered: m.answered,
+    createdAt: m.createdAt,
     status: m.role === 'user' ? 'sent' : undefined,
   };
 }
@@ -185,7 +186,7 @@ export default function Chat() {
       const key = localKey();
       setMessages((prev) => [
         ...prev,
-        { key, role: 'user', content: text, category: null, answered: null, status: 'sending' },
+        { key, role: 'user', content: text, category: null, answered: null, status: 'sending', createdAt: new Date().toISOString() },
       ]);
       void deliver(key, text);
     },

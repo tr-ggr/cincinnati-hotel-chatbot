@@ -3,6 +3,46 @@
 > Source of truth for the build. Sprint cards in `sprints/` reference sections of this file by number (§).
 > S4-03 refines this document (adds a Mermaid diagram, prose) but must not change contracts without updating code.
 
+## At a glance
+
+```mermaid
+flowchart LR
+  guest["Guest or admin browser"]
+  cf["cloudflared<br/>Cloudflare Tunnel<br/>(compose profile: tunnel)"]
+  nginx["nginx in web container<br/>:80 SPA and /api proxy"]
+  api["Fastify API :3000<br/>sessions, leads, admin, SSE"]
+  n8n["n8n 2.45.5<br/>WF1 ingest, WF2 chat, WF3 lead"]
+  pg[("Postgres 16 + pgvector<br/>hotel and n8n databases")]
+  openai["OpenAI<br/>embeddings and chat"]
+  resend["Resend<br/>lead email"]
+
+  guest -->|"hotel.example.com"| cf
+  guest -->|"n8n.example.com (editor)"| cf
+  cf -->|"http://web:80"| nginx
+  cf -->|"http://n8n:5678"| n8n
+  nginx -->|"/api/*"| api
+  api -->|"http://n8n:5678/webhook/hotel/*<br/>x-hotel-secret, internal only"| n8n
+  n8n -->|"GET /internal/documents/:id/file"| api
+  api -->|"SQL"| pg
+  n8n -->|"PGVector node and SQL"| pg
+  n8n -->|"embeddings and chat completions"| openai
+  n8n -->|"POST /emails"| resend
+```
+
+Only the public hostnames cross the tunnel. The API to n8n hop and the n8n to API PDF download stay on the Docker network.
+Local development has no tunnel: the browser talks to `http://localhost:8080` (or `http://[::1]:8080`) directly.
+
+### Chosen technologies and why
+
+- **React 19, Vite, Tailwind v4.** A small single-page app with a fast dev loop. Tailwind v4 needs no config file. The UI adds only Recharts (the one chart), lucide-react (icons), react-markdown (assistant answers) and clsx. There is no component library and no state library, because the brief favours a light UI.
+- **Fastify 5 with TypeScript (ESM).** The API is a thin, typed layer: zod validates input, `pg` runs hand-written SQL in `db/queries.ts` (no ORM), and SSE is about 50 lines in `lib/sse.ts`.
+- **n8n 2.45.5 for all AI work.** Every AI step (download, load, split, embed, retrieve, prompt, parse, guard, email) is a node with its own execution log. Prompts and models can be inspected and changed in the editor without touching API code. The version is pinned in `.env`; `latest` is never used.
+- **Postgres 16 with pgvector.** One database holds the app data and the vectors, so no separate vector service is needed. The `chunks` table uses the LangChain layout that the n8n PGVector node expects, which means n8n writes vectors without custom code. An HNSW index on cosine distance serves retrieval.
+- **OpenAI `text-embedding-3-small` (1536 dimensions) and `gpt-4.1-mini`.** Cheap and fast, with reliable JSON output at temperature 0. The 1536 dimension count is fixed by the schema.
+- **Resend.** A plain HTTP email API. The lead email sets `reply_to` to the guest, so a reviewer can reply directly.
+- **Docker Compose, nginx and a Cloudflare Tunnel.** One Compose file brings up the whole stack locally or on a VPS. The tunnel terminates HTTPS, so there are no inbound ports and no certificate handling. nginx serves the SPA and proxies `/api` with buffering off, so SSE is not held back.
+- **Request and response chat, no token streaming.** n8n webhooks return one JSON reply. The UI shows a typing indicator while the reply is pending.
+
 ## §1 Overview and key decisions
 
 ```
@@ -83,7 +123,7 @@ TaugaAI/
 │   ├── docker-compose.yml  compose.override.yml
 │   ├── db/00-create-n8n-db.sh  01-schema.sql
 │   ├── cloudflared/README.md
-│   └── scripts/n8n-import.sh  deploy.sh  smoke.sh
+│   └── scripts/n8n-import.sh  smoke.sh  chat-eval.sh  lead-test.sh  deploy.sh (S5)
 ├── docs/  ARCHITECTURE.md  PDF-PROCESSING.md  ADMIN-DASHBOARD.md  RUNBOOK.md  SUBMISSION.md
 │          screenshots/  sample/{generate-sample-pdf.ts, cincinnati-hotel.pdf, questions.json}
 └── sprints/  README.md  STATUS.md  S0..S5-*.md
@@ -180,7 +220,9 @@ Notes
 
 ## §4 API contract
 
-Base `/api`. JSON everywhere except upload. Errors: `{ "error": { "code": "UPPER_SNAKE", "message": "..." } }`. CORS open (same-origin via nginx in prod anyway). Rate limit 60 req/min/IP (S4-01).
+Base `/api`. JSON everywhere except upload. Errors: `{ "error": { "code": "UPPER_SNAKE", "message": "..." } }`. CORS open (same-origin via nginx in prod anyway). Rate limit 60 req/min/IP is planned under S4-01 and is not yet registered in `apps/api/src/index.ts`.
+
+Additional error codes the code returns and the UI handles (not in the lists below): `VALIDATION_ERROR` (400, zod or Fastify validation), `FILE_TOO_LARGE` (413, upload over `MAX_UPLOAD_MB`), `UNAUTHORIZED` (401, `/internal/*` without the secret), `NOT_FOUND` (404, unknown route).
 
 ```
 GET  /api/health
@@ -260,6 +302,9 @@ Common
 - Every Webhook node: method POST, path `hotel/<name>`, authentication **Header Auth** (credential `Hotel Webhook Secret`: header `x-hotel-secret`), Respond = "Using 'Respond to Webhook' node".
 - The API calls `http://n8n:5678/webhook/hotel/<name>` over the Docker network with the same header. The tunnel is never involved.
 - Workflow JSON files reference credentials **by name**; `infra/scripts/n8n-import.sh` creates them with fixed ids from `n8n/credentials.template.json` (envsubst from `.env`).
+  Fixed credential ids: `cred-openai`, `cred-postgres`, `cred-webhook-secret`, `cred-resend` (names in the table below).
+- Fixed workflow ids (the top-level `"id"` in each JSON): `hotelIngestPdf01` (WF1), `hotelChatAnswr02` (WF2), `hotelLeadEmail03` (WF3). Re-imports overwrite in place.
+- Activation on n8n 2.45.5: `import:workflow --separate` → `publish:workflow --id=<id>` for each workflow → restart n8n. `update:workflow --active` is deprecated on 2.x and is not used. A workflow that is not published answers its webhook with 404.
 
 ### WF1 `01-ingest-pdf` — path `hotel/ingest`
 Input: `{ "document_id": uuid, "filename": string, "file_url": "http://api:3000/internal/documents/<id>/file" }`
@@ -286,14 +331,17 @@ Input: `{ "session_id", "message_id", "question", "document_id", "history": [{ "
    - `Embeddings OpenAI` — `text-embedding-3-small`
 4. `Code` "Build context" — Run Once for All Items. Collects `document.pageContent` + `score` from all input items into ONE item:
    `{ context: "[1] ...\n\n[2] ...", best_score, n_chunks, question, history, document_id }` (`context = ""` and `n_chunks = 0` when nothing returned). Formats `history` as `Guest: ...\nAssistant: ...` lines.
-5. `Basic LLM Chain` — prompt = `n8n/prompts/chat-system.md` with `{{ context }}`, `{{ history }}`, `{{ question }}` substituted; "Require Specific Output Format" on
-   - `OpenAI Chat Model` — `gpt-4.1-mini`, temperature 0, max tokens 600
-   - `Structured Output Parser` — JSON schema:
+5. `Has context?` (IF) — `n_chunks > 0`. **False** → skip the LLM and go straight to step 6 (no chat call is made; the guard returns the canned sentence). **True** → the LLM branch below.
+   - `Basic LLM Chain` — prompt = `n8n/prompts/chat-system.md` with `{{ context }}`, `{{ history }}`, `{{ question }}` substituted; "Require Specific Output Format" on; On Error: Continue (errors reach step 6 as `{ error }`)
+   - `OpenAI Chat Model` — `gpt-4.1-mini`, temperature 0, max tokens 600, `responsesApiEnabled: false` (Chat Completions API, deliberately not the Responses API)
+   - `Structured Output Parser` — JSON schema, **`autoFix: true`** (the same model gets one repair attempt on malformed output):
      `{ "answer": string, "category": enum[8 categories] (with one-line descriptions), "answered": boolean }`
 6. `Code` "Guard & finalize" — deterministic invariants:
    - `if (!answered || n_chunks === 0)` → `answer = "I'm sorry, I don't have that information right now."`, `answered = false`
    - category not in taxonomy → `Other`
-   - parse failure / missing fields → `answered=false`, `category="Other"`, canned answer
+   - parse failure / missing fields → `answered=false`, `category="Other"`, canned answer (HTTP 200 to the API)
+   - **error split:** a parser failure (`doesn't fit required format`, `empty response to the Structured Output Parser`, `Failed to parse`, `Unable to parse`) is a canned 200 as above. Any other error (OpenAI auth, quota, rate limit, network, timeout) makes the guard throw → webhook returns 500 → API answers `502 ASSISTANT_UNAVAILABLE`. An outage is not reported as "unknown", so the contact form is not offered for it.
+   - **retrieval score:** the PGVector `score` is a cosine **distance** (lower = more similar; `0` identical). The score guard is **off by default** (`SCORE_GUARD = 0`). When it is set above 0 it is a maximum distance; `Other` is exempt. See `n8n/README.md` "Retrieval score semantics".
    - optional score guard, **off by default**: workflow static value `SCORE_GUARD = 0`; when set, `best_score` worse than threshold → `answered=false` (S2-02 records the calibrated score semantics in `n8n/README.md`)
    - attach `sources: [{chunk_index, score}]`, `model`, `latency_ms`
 7. `Respond to Webhook` — `{ "answer", "category", "answered", "sources", "model" }`
@@ -306,8 +354,8 @@ Input: `{ "lead": { "name", "phone", "email" }, "session_id", "unanswered_questi
    - `OpenAI Chat Model` — `gpt-4.1-mini`, temperature 0.2
 3. `Code` "Compose email" — builds `subject`, `html`, `text`: lead details table, summary, highlighted unanswered question, full transcript
 4. `HTTP Request` — POST `https://api.resend.com/emails`, credential `Resend` (Header Auth `Authorization: Bearer <RESEND_API_KEY>`), JSON body
-   `{ from: EMAIL_FROM, to: ["idan@tauga.ai","deleonajiraydiego@gmail.com"], reply_to: lead.email, subject: "Cincinnati Hotel chatbot — contact request from <name>", html, text }`
-   (`from`/`to` are workflow static values populated by the import script from `EMAIL_FROM` / `LEAD_TO`)
+   `{ from: EMAIL_FROM, to: [LEAD_TO entries], reply_to: lead.email, subject: "Cincinnati Hotel chatbot — contact request from <name>", html, text }`
+   (`LEAD_TO` is a comma-separated list. `infra/scripts/n8n-import.sh` substitutes `${EMAIL_FROM}` and `${LEAD_TO}` into the `Compose email` code node at import time, and the node splits `LEAD_TO` on commas. The repo JSON keeps the placeholders, so no real address is committed. If either value is empty, the `Compose email` node throws and the lead is recorded with `emailStatus: failed`.)
 5. `Respond to Webhook` — `{ "ok": true, "email_id": "<resend id>", "summary": "..." }`
 
 ### Credentials (`n8n/credentials.template.json`)
@@ -491,16 +539,21 @@ volumes:
 - ports: postgres `${POSTGRES_HOST_PORT:-5432}:5432`, n8n `5678:5678`, api `${API_HOST_PORT:-3000}:3000`, web `8080:80`
 - n8n env: `N8N_PROTOCOL=http`, `N8N_HOST=localhost`, `N8N_WEBHOOK_URL=http://localhost:5678/`, `N8N_EDITOR_BASE_URL=http://localhost:5678/`, `N8N_SECURE_COOKIE=false`
 
-Production: `docker compose -f infra/docker-compose.yml --profile tunnel up -d --build`.
+Production: `docker compose --env-file .env -f infra/docker-compose.yml --profile tunnel up -d --build` (no override file; see `infra/cloudflared/README.md`).
 
-`.env.example`
+Compose conventions
+- Compose reads variables from the **project directory**, which is `infra/` for these files. Always pass `--env-file .env` (repo root) so the `.env` at the repo root is used. Without it, `${POSTGRES_USER}` and friends are empty.
+- Dev host ports are overridable: `API_HOST_PORT` (default 3000) and `POSTGRES_HOST_PORT` (default 5432) in `.env`, for when those ports are already taken on the host. The web port 8080 and n8n port 5678 are fixed in the override.
+- Healthchecks call `127.0.0.1`, not `localhost`. Alpine resolves `localhost` to `::1` first, and the services listen on IPv4 only, so a `localhost` check would fail.
+
+`.env.example` (mirrors the real file at the repo root; keep the two in sync)
 ```
 # Postgres
 POSTGRES_USER=hotel
 POSTGRES_PASSWORD=change-me
 POSTGRES_DB=hotel
-# n8n
-N8N_VERSION=            # S0-04 pins the current stable tag here
+# n8n (N8N_VERSION pinned - never :latest)
+N8N_VERSION=2.45.5
 N8N_ENCRYPTION_KEY=     # openssl rand -hex 24
 N8N_HOST=n8n.example.com
 N8N_WEBHOOK_SECRET=     # openssl rand -hex 24
@@ -513,15 +566,24 @@ OPENAI_API_KEY=
 RESEND_API_KEY=
 EMAIL_FROM="Cincinnati Hotel Assistant <concierge@example.com>"
 LEAD_TO=idan@tauga.ai,deleonajiraydiego@gmail.com
+# Optional: n8n owner account used by infra/scripts/n8n-import.sh automation
+# N8N_OWNER_EMAIL=
+# N8N_OWNER_PASSWORD=
+
+# Dev only: host port for the API container (compose.override.yml). Change if 3000 is taken.
+API_HOST_PORT=3000
+
+# Dev only: host port for postgres (compose.override.yml). Change if 5432 is taken.
+POSTGRES_HOST_PORT=5432
 ```
 
-Local dev without containers for api/web: `docker compose -f infra/docker-compose.yml up -d postgres n8n`, then `pnpm dev` with `DATABASE_URL=postgres://hotel:…@localhost:5432/hotel`, `N8N_BASE_URL=http://localhost:5678`, `INTERNAL_BASE_URL=http://host.docker.internal:3000` (so n8n in Docker can reach the host API).
+Local dev without containers for api/web: `docker compose --env-file .env -f infra/docker-compose.yml up -d postgres n8n`, then `pnpm dev`. The API does not read `.env` itself, so export the variables first, with `DATABASE_URL=postgres://hotel:…@localhost:5432/hotel` (or the `POSTGRES_HOST_PORT` you set), `N8N_BASE_URL=http://localhost:5678`, `INTERNAL_BASE_URL=http://host.docker.internal:3000` (so n8n in Docker can reach the host API), and the `N8N_WEBHOOK_SECRET` from `.env`. The step-by-step version is in `docs/RUNBOOK.md`.
 
 ngrok alternative (`infra/cloudflared/README.md`): one ngrok agent with two tunnels (`web` → 8080, `n8n` → 5678) or two `ngrok http` processes; set `N8N_HOST` / `N8N_WEBHOOK_URL` / `N8N_EDITOR_BASE_URL` to the ngrok n8n hostname.
 
 ## §8 Verification
 
-1. **Local full stack**: `docker compose -f infra/docker-compose.yml up -d --build`. First run: open `http://localhost:5678`, create the owner account, run `bash infra/scripts/n8n-import.sh`.
+1. **Local full stack**: `docker compose --env-file .env -f infra/docker-compose.yml -f infra/compose.override.yml up -d --build`. First run: open `http://localhost:5678`, create the owner account, run `bash infra/scripts/n8n-import.sh`. Step-by-step in `docs/RUNBOOK.md`.
 2. **Seed**: `pnpm sample:pdf` (already committed) → upload via `http://localhost:8080/admin` or `curl -F file=@docs/sample/cincinnati-hotel.pdf localhost:8080/api/admin/document`.
 3. **Scripted smoke** `bash infra/scripts/smoke.sh --base http://localhost:8080`:
    - upload → `status=ready`, `chunkCount > 10` (mock: 42)
