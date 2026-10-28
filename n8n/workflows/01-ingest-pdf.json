@@ -1,0 +1,195 @@
+{
+  "id": "hotelIngestPdf01",
+  "name": "01-ingest-pdf",
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true
+  },
+  "nodes": [
+    {
+      "id": "1b0c3c6e-7a1f-4c55-9f0e-0a1e00000001",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.2,
+      "position": [0, 0],
+      "webhookId": "5f3d2b0a-1c4e-4b8f-9a6d-0a1e0000a001",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "hotel/ingest",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": { "id": "cred-webhook-secret", "name": "Hotel Webhook Secret" }
+      }
+    },
+    {
+      "id": "1b0c3c6e-7a1f-4c55-9f0e-0a1e00000002",
+      "name": "Download PDF",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [220, 0],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.body.file_url }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "data"
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": { "id": "cred-webhook-secret", "name": "Hotel Webhook Secret" }
+      }
+    },
+    {
+      "id": "1b0c3c6e-7a1f-4c55-9f0e-0a1e00000003",
+      "name": "Postgres PGVector Store",
+      "type": "@n8n/n8n-nodes-langchain.vectorStorePGVector",
+      "typeVersion": 1.3,
+      "position": [460, 0],
+      "parameters": {
+        "mode": "insert",
+        "tableName": "chunks",
+        "options": {}
+      },
+      "credentials": {
+        "postgres": { "id": "cred-postgres", "name": "Hotel Postgres" }
+      }
+    },
+    {
+      "id": "1b0c3c6e-7a1f-4c55-9f0e-0a1e00000004",
+      "name": "Embeddings OpenAI",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOpenAi",
+      "typeVersion": 1.2,
+      "position": [400, 240],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "parameters": {
+        "model": "text-embedding-3-small",
+        "options": {}
+      },
+      "credentials": {
+        "openAiApi": { "id": "cred-openai", "name": "OpenAI account" }
+      }
+    },
+    {
+      "id": "1b0c3c6e-7a1f-4c55-9f0e-0a1e00000005",
+      "name": "Default Data Loader",
+      "type": "@n8n/n8n-nodes-langchain.documentDefaultDataLoader",
+      "typeVersion": 1.1,
+      "position": [580, 240],
+      "parameters": {
+        "dataType": "binary",
+        "binaryMode": "specificField",
+        "loader": "pdfLoader",
+        "binaryDataKey": "data",
+        "textSplittingMode": "custom",
+        "options": {
+          "metadata": {
+            "metadataValues": [
+              { "name": "document_id", "value": "={{ $('Webhook').first().json.body.document_id }}" },
+              { "name": "filename", "value": "={{ $('Webhook').first().json.body.filename }}" }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "1b0c3c6e-7a1f-4c55-9f0e-0a1e00000006",
+      "name": "Recursive Character Text Splitter",
+      "type": "@n8n/n8n-nodes-langchain.textSplitterRecursiveCharacterTextSplitter",
+      "typeVersion": 1,
+      "position": [680, 440],
+      "parameters": {
+        "chunkSize": 1000,
+        "chunkOverlap": 150,
+        "options": {}
+      }
+    },
+    {
+      "id": "1b0c3c6e-7a1f-4c55-9f0e-0a1e00000007",
+      "name": "Purge old vectors",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [800, 0],
+      "executeOnce": true,
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "DELETE FROM chunks WHERE metadata->>'document_id' <> $1",
+        "options": {
+          "queryReplacement": "={{ $('Webhook').first().json.body.document_id }}"
+        }
+      },
+      "credentials": {
+        "postgres": { "id": "cred-postgres", "name": "Hotel Postgres" }
+      }
+    },
+    {
+      "id": "1b0c3c6e-7a1f-4c55-9f0e-0a1e00000008",
+      "name": "Count chunks",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [1020, 0],
+      "executeOnce": true,
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT count(*)::int AS chunk_count FROM chunks WHERE metadata->>'document_id' = $1",
+        "options": {
+          "queryReplacement": "={{ $('Webhook').first().json.body.document_id }}"
+        }
+      },
+      "credentials": {
+        "postgres": { "id": "cred-postgres", "name": "Hotel Postgres" }
+      }
+    },
+    {
+      "id": "1b0c3c6e-7a1f-4c55-9f0e-0a1e00000009",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [1240, 0],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: true, document_id: $('Webhook').first().json.body.document_id, chunk_count: Number($json.chunk_count) } }}",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [[{ "node": "Download PDF", "type": "main", "index": 0 }]]
+    },
+    "Download PDF": {
+      "main": [[{ "node": "Postgres PGVector Store", "type": "main", "index": 0 }]]
+    },
+    "Postgres PGVector Store": {
+      "main": [[{ "node": "Purge old vectors", "type": "main", "index": 0 }]]
+    },
+    "Purge old vectors": {
+      "main": [[{ "node": "Count chunks", "type": "main", "index": 0 }]]
+    },
+    "Count chunks": {
+      "main": [[{ "node": "Respond to Webhook", "type": "main", "index": 0 }]]
+    },
+    "Embeddings OpenAI": {
+      "ai_embedding": [[{ "node": "Postgres PGVector Store", "type": "ai_embedding", "index": 0 }]]
+    },
+    "Default Data Loader": {
+      "ai_document": [[{ "node": "Postgres PGVector Store", "type": "ai_document", "index": 0 }]]
+    },
+    "Recursive Character Text Splitter": {
+      "ai_textSplitter": [[{ "node": "Default Data Loader", "type": "ai_textSplitter", "index": 0 }]]
+    }
+  },
+  "pinData": {},
+  "tags": []
+}
