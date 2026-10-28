@@ -19,17 +19,17 @@ Maintained by the orchestrator. One row per card. States: `todo` · `running` ·
 | S1-03 | sonnet 5.5 | passed | 1 | pdf-parse v2 works on alpine; mock upload 7 pages/42 chunks; SSE ok |
 | S1-04 | haiku 5.5 | passed | 1 | mock smoke 7/7 PASS |
 | S1 gate | — | passed | 1 | mock smoke PASS, typecheck ok |
-| S2-01 | opus 5.5 | todo | 0 | |
+| S2-01 | opus 5.5 | blocked-human | 1 | import ok (4 creds, WF1 published via publish:workflow); ingest needs OPENAI_API_KEY (24 chunks expected) |
 | S2-02 | opus 5.5 | todo | 0 | |
 | S2-03 | sonnet 5.5 | todo | 0 | |
 | S2-04 | sonnet 5.5 | todo | 0 | |
 | S2-05 | haiku 5.5 | todo | 0 | |
 | S2 gate | — | todo | 0 | |
-| S3-01 | sonnet 5.5 | todo | 0 | |
-| S3-02 | sonnet 5.5 | todo | 0 | |
-| S3-03 | sonnet 5.5 | todo | 0 | |
-| S3-04 | haiku 5.5 | todo | 0 | droppable |
-| S3 gate | — | todo | 0 | |
+| S3-01 | sonnet 5.5 | passed | 1 | lib/index + components/ui/index barrels; categories identical |
+| S3-02 | sonnet 5.5 | passed | 1 | verified live at 375px via playwright-cli; bundle 716kB (code-split idea for S4-02) |
+| S3-03 | sonnet 5.5 | passed | 1 | live check ok (Live badge, +1 within 2s, upload via UI) |
+| S3-04 | haiku 5.5 | passed | 1 | 2/2 specs pass (E2E_BASE_URL=http://[::1]:8080) |
+| S3 gate | — | passed | 1 | e2e 2/2, no console errors, 375+1280px ok, admin 4 cards+chart+Live |
 | S4-01 | opus 5.5 | todo | 0 | |
 | S4-02 | sonnet 5.5 | todo | 0 | droppable |
 | S4-03 | haiku 5.5 | todo | 0 | |
@@ -49,3 +49,8 @@ _(orchestrator appends dated one-liners here: gate results, escalations, handoff
 - 2026-10-28 S0 gate passed (attempt 2) → commit 'S0: scaffold'.
 - 2026-10-28 S1-01: host :5432 also bound by user's native Windows postgres (not touched). S1-H1 adds POSTGRES_HOST_PORT; S1-01 db-check acceptance run with localhost:5433.
 - 2026-10-28 S1 gate passed → commit 'S1: api core'.
+- 2026-10-28 local n8n owner created via POST /rest/owner/setup (owner@localhost.test). Keys still empty in .env → S2-01 builds/imports now, OpenAI-dependent acceptance deferred until key filled.
+- 2026-10-28 local :8080 IPv4 is held by user's Apache (httpd); our nginx answers on [::1]:8080. curl 'localhost' resolves IPv6 → smoke OK. Browser checks use http://[::1]:8080.
+- 2026-10-28 S3 gate passed → commit 'S3: web'.
+- 2026-10-28 S2-01: creds use fixed ids cred-*; WF ids hotelIngestPdf01 / hotelChatAnswr02 / hotelLeadEmail03; activation = n8n publish:workflow + restart (update:workflow deprecated on 2.45.5). Downstream verified with fake embeddings (24 chunks, purge ok). Blocked on OPENAI_API_KEY.
+- 2026-10-28 user: "build, update status, commit, push; keys later". Built + committed. Push NOT done: no git remote, and the only gh account is a bee-man-dan account (user said not to use those) → push waits for S5-01 (user creates repo/remote).

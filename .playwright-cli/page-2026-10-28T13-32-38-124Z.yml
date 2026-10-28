@@ -1,0 +1,34 @@
+- main [ref=e3]:
+  - generic [ref=e4]:
+    - generic [ref=e5]:
+      - link "Home" [ref=e6] [cursor=pointer]:
+        - /url: /
+      - heading "Admin dashboard" [level=1] [ref=e9]
+    - status [ref=e10]: Connecting
+  - region "Key numbers" [ref=e13]:
+    - generic [ref=e21]:
+      - paragraph [ref=e22]: Total sessions
+      - generic [ref=e24]: Loading
+    - generic [ref=e29]:
+      - paragraph [ref=e30]: Questions asked
+      - generic [ref=e32]: Loading
+    - generic [ref=e37]:
+      - paragraph [ref=e38]: Unanswered
+      - generic [ref=e40]: Loading
+    - generic [ref=e46]:
+      - paragraph [ref=e47]: Leads captured
+      - generic [ref=e49]: Loading
+  - generic [ref=e50]:
+    - generic [ref=e51]:
+      - heading "Knowledge base" [level=2] [ref=e52]
+      - generic [ref=e58]:
+        - generic [ref=e59]:
+          - paragraph [ref=e60]: cincinnati-hotel.pdf
+          - generic [ref=e61]: Ready
+        - paragraph [ref=e62]: 7 pages · 42 chunks · 20 KB · uploaded 2 minutes ago
+      - generic [ref=e63]:
+        - paragraph [ref=e67]: Drag and drop a PDF here, or
+        - button "Choose File" [ref=e68]
+        - button "Replace PDF" [ref=e69]
+        - paragraph [ref=e70]: Replacing the document switches the chatbot to the new content. PDF only, up to 25 MB.
+    - heading "Questions by category" [level=2] [ref=e73]
