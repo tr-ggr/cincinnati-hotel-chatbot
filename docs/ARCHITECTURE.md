@@ -488,7 +488,7 @@ volumes:
 ```
 
 `infra/compose.override.yml` (dev only; auto-merged when running from `infra/`, or pass `-f` both; deploy uses `-f docker-compose.yml` only)
-- ports: postgres `5432:5432`, n8n `5678:5678`, api `${API_HOST_PORT:-3000}:3000`, web `8080:80`
+- ports: postgres `${POSTGRES_HOST_PORT:-5432}:5432`, n8n `5678:5678`, api `${API_HOST_PORT:-3000}:3000`, web `8080:80`
 - n8n env: `N8N_PROTOCOL=http`, `N8N_HOST=localhost`, `N8N_WEBHOOK_URL=http://localhost:5678/`, `N8N_EDITOR_BASE_URL=http://localhost:5678/`, `N8N_SECURE_COOKIE=false`
 
 Production: `docker compose -f infra/docker-compose.yml --profile tunnel up -d --build`.

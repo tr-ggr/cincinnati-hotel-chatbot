@@ -36,7 +36,7 @@ workflows, compose topology and prompts. Sprint cards reference its sections (§
   `docker compose -f infra/docker-compose.yml exec n8n n8n export:workflow --all --separate --output=/import/workflows`
 - Never float `n8nio/n8n:latest`; `N8N_VERSION` is pinned in `.env(.example)`.
 - Keep the UI dependency-light: Tailwind v4, lucide-react, recharts, react-markdown, clsx. No shadcn, no state libraries.
-- Ports: web 8080 (nginx) / 5173 (vite), api 3000, n8n 5678, postgres 5432 (api host port overridable via API_HOST_PORT).
+- Ports: web 8080 (nginx) / 5173 (vite), api 3000, n8n 5678, postgres 5432 (api/postgres host ports overridable via API_HOST_PORT / POSTGRES_HOST_PORT).
 - Commits: conventional one-liners per sprint gate (`S1: api core`). **Never add Claude as a co-author** on commits.
 
 ## Working rules for subagents (sprint cards)
