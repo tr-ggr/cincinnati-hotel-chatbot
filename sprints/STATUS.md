@@ -38,7 +38,7 @@ Maintained by the orchestrator. One row per card. States: `todo` · `running` ·
 | S4 gate | — | passed | 1 | real smoke 3× PASS, typecheck+build ok, docs ok, unhandled/FATAL=0, no secrets in logs |
 | S5-01 | human | todo | 0 | |
 | S5-02 | opus 5.5 + human | blocked-human | 1 | deploy.sh written (bash -n ok, preflight dry-runs ok); VPS deploy waits on S0-06 + S5-01 + keys |
-| S5-03 | haiku 5.5 | todo | 0 | |
+| S5-03 | opus 5.5 | passed | 1 | docs/SUBMISSION.md written; ⟨PUBLIC_WEB_HOST⟩/⟨N8N_HOST⟩/⟨REPO_URL⟩/⟨YOUR NAME⟩ markers for the user to fill in S5-04 |
 | S5-04 | human | todo | 0 | |
 
 ## Log
@@ -61,3 +61,4 @@ _(orchestrator appends dated one-liners here: gate results, escalations, handoff
 - 2026-10-29 keys filled by user. EMAIL_FROM was a bare domain → set to `Cincinnati Hotel Assistant <concierge@mail.tristanjamestolentino.com>` (domain verified in Resend); LEAD_TO = user's own test inbox; N8N_MOCK=0.
 - 2026-10-29 S2 gate passed (real mode) → commit 'S2: n8n workflows'.
 - 2026-10-29 S4 gate passed (real mode) → commit 'S4: polish + docs'. No push: still no git remote (S5-01).
+- 2026-10-29 S5-03 passed. Remaining (human): S0-06 Cloudflare tunnel token, S5-01 GitHub repo (non-bee-man-dan), S5-02 VPS deploy (set LEAD_TO to reviewers there), S5-04 screenshots + email.
