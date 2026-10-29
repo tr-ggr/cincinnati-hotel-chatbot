@@ -116,29 +116,11 @@
       }
     },
     {
-      "id": "1b0c3c6e-7a1f-4c55-9f0e-0a1e00000007",
-      "name": "Purge old vectors",
-      "type": "n8n-nodes-base.postgres",
-      "typeVersion": 2.8,
-      "position": [800, 0],
-      "executeOnce": true,
-      "parameters": {
-        "operation": "executeQuery",
-        "query": "DELETE FROM chunks WHERE metadata->>'document_id' <> $1",
-        "options": {
-          "queryReplacement": "={{ $('Webhook').first().json.body.document_id }}"
-        }
-      },
-      "credentials": {
-        "postgres": { "id": "cred-postgres", "name": "Hotel Postgres" }
-      }
-    },
-    {
       "id": "1b0c3c6e-7a1f-4c55-9f0e-0a1e00000008",
       "name": "Count chunks",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.8,
-      "position": [1020, 0],
+      "position": [800, 0],
       "executeOnce": true,
       "parameters": {
         "operation": "executeQuery",
@@ -156,7 +138,7 @@
       "name": "Respond to Webhook",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.5,
-      "position": [1240, 0],
+      "position": [1020, 0],
       "parameters": {
         "respondWith": "json",
         "responseBody": "={{ { ok: true, document_id: $('Webhook').first().json.body.document_id, chunk_count: Number($json.chunk_count) } }}",
@@ -172,9 +154,6 @@
       "main": [[{ "node": "Postgres PGVector Store", "type": "main", "index": 0 }]]
     },
     "Postgres PGVector Store": {
-      "main": [[{ "node": "Purge old vectors", "type": "main", "index": 0 }]]
-    },
-    "Purge old vectors": {
       "main": [[{ "node": "Count chunks", "type": "main", "index": 0 }]]
     },
     "Count chunks": {

@@ -12,8 +12,8 @@
 #   1. loads .env, fills apps/n8n/credentials.template.json (${VAR} placeholders, values JSON-escaped) and streams it
 #      straight into the container (/tmp/hotel-import) — the filled file is never written on the host
 #   2. n8n import:credentials
-#   3. copies apps/n8n/workflows/*.json into the container (03-* gets ${EMAIL_FROM} / ${LEAD_TO} substituted first)
-#      and runs n8n import:workflow --separate
+#   3. copies apps/n8n/workflows/*.json into the container (03-* gets ${EMAIL_FROM_JSON} / ${LEAD_TO_JSON} replaced by
+#      EMAIL_FROM / LEAD_TO as JS string literals first) and runs n8n import:workflow --separate
 #   4. n8n publish:workflow --id=<id> for every imported workflow (n8n 2.x: update:workflow --active is deprecated)
 #   5. deletes the temp files in the container, restarts n8n and waits for /healthz, then verifies activation
 set -euo pipefail
@@ -83,6 +83,10 @@ n8n_exec sh -c "rm -rf $CTMP && mkdir -p $CTMP/workflows && chmod 700 $CTMP"
 
 # JSON-escape a value so it can be substituted inside a JSON string literal
 json_escape() { printf '%s' "$1" | jq -Rs . | sed -e 's/^"//' -e 's/"$//'; }
+# A value as a complete JS string literal (JSON string, quotes included), escaped once more because it is substituted
+# into the jsCode JSON string of a Code node: Cincinnati Hotel's "Desk" <a@b.c> -> \"Cincinnati Hotel's \\\"Desk\\\" <a@b.c>\"
+# which n8n parses back to the JS source  "Cincinnati Hotel's \"Desk\" <a@b.c>"  (no quoting can break out of it).
+js_literal_in_json() { json_escape "$(printf '%s' "$1" | jq -Rs .)"; }
 
 # --- credentials ----------------------------------------------------------------------------------------
 log "importing credentials from $N8N_DIR/credentials.template.json"
@@ -109,8 +113,9 @@ else
       [ -n "${EMAIL_FROM:-}" ] || warn "EMAIL_FROM is EMPTY — $base will send from an empty address"
       [ -n "${LEAD_TO:-}" ]    || warn "LEAD_TO is EMPTY — $base will have no recipients"
       (
-        export EMAIL_FROM="$(json_escape "${EMAIL_FROM:-}")" LEAD_TO="$(json_escape "${LEAD_TO:-}")"
-        envsubst '${EMAIL_FROM} ${LEAD_TO}' < "$wf" | jq -c .
+        EMAIL_FROM_JSON="$(js_literal_in_json "${EMAIL_FROM:-}")" LEAD_TO_JSON="$(js_literal_in_json "${LEAD_TO:-}")"
+        export EMAIL_FROM_JSON LEAD_TO_JSON
+        envsubst '${EMAIL_FROM_JSON} ${LEAD_TO_JSON}' < "$wf" | jq -c .
       ) | n8n_exec sh -c "cat > $CTMP/workflows/$base"
     else
       jq -c . "$wf" | n8n_exec sh -c "cat > $CTMP/workflows/$base"

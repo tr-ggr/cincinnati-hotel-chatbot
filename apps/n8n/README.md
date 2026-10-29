@@ -3,7 +3,7 @@
 All AI logic of the chatbot lives in three n8n workflows. The API (`apps/api`) never calls OpenAI or Resend
 directly; it calls these workflows over the internal Docker network. Architecture background:
 [`docs/ARCHITECTURE.md`](../../docs/ARCHITECTURE.md) (§1 decisions, §5 workflow contracts, §7 compose and env).
-PDF ingestion in depth: [`docs/PDF-PROCESSING.md`](../../docs/PDF-PROCESSING.md) (written in S4).
+PDF ingestion in depth: [`docs/PDF-PROCESSING.md`](../../docs/PDF-PROCESSING.md).
 
 Pinned runtime: **n8n `2.45.5`** (`N8N_VERSION` in `.env`, never `latest`).
 
@@ -11,7 +11,7 @@ Pinned runtime: **n8n `2.45.5`** (`N8N_VERSION` in `.env`, never `latest`).
 
 | # | Workflow (file) | Workflow id | Webhook path | Purpose | Called by |
 |---|---|---|---|---|---|
-| 1 | `01-ingest-pdf.json` | `hotelIngestPdf01` | `POST /webhook/hotel/ingest` | Download an uploaded PDF, split it, embed it and store the chunks in `chunks` (pgvector), then purge older documents' chunks | API, on admin upload |
+| 1 | `01-ingest-pdf.json` | `hotelIngestPdf01` | `POST /webhook/hotel/ingest` | Download an uploaded PDF, split it, embed it and store the chunks in `chunks` (pgvector) and report how many were written. Older documents' chunks are deleted by the API when it activates the new document | API, on admin upload |
 | 2 | `02-chat-answer.json` | `hotelChatAnswr02` | `POST /webhook/hotel/chat` | Retrieve the top 6 chunks of the active document, answer **only** from them, classify the question into one of 8 categories | API, on each guest message |
 | 3 | `03-lead-email.json` | `hotelLeadEmail03` | `POST /webhook/hotel/lead` | Summarise the chat and email it to the reviewers via Resend (`reply_to` = guest) | API, on contact form submit |
 
@@ -27,23 +27,27 @@ Webhook → Download PDF (HTTP Request) → Postgres PGVector Store [insert, tab
                                           ├─ ai_document  ← Default Data Loader (PDF, metadata)
                                           │                  └─ ai_textSplitter ← Recursive Character Text Splitter
                                           └─ ai_embedding ← Embeddings OpenAI
-        → Purge old vectors (Postgres) → Count chunks (Postgres) → Respond to Webhook { ok, document_id, chunk_count }
+        → Count chunks (Postgres) → Respond to Webhook { ok, document_id, chunk_count }
 ```
+
+WF1 only **adds** chunks. It does not delete anything: the API removes the previous documents' chunks inside the
+same transaction that activates the new document, after this webhook has answered. A failed ingest therefore never
+touches the active knowledge base, and the switch from the old to the new document is atomic.
 
 | Node | Type (typeVersion) | Key parameters | Why |
 |---|---|---|---|
 | `Webhook` | `n8n-nodes-base.webhook` (2.2) | `POST`, path `hotel/ingest`, Header Auth (`Hotel Webhook Secret`), respond via *Respond to Webhook* | The only entry point; rejects requests without `x-hotel-secret` |
 | `Download PDF` | `n8n-nodes-base.httpRequest` (4.5) | `GET {{ $json.body.file_url }}`, Header Auth `x-hotel-secret`, response format **File**, output property `data` | Fetches the file from the API's internal route (`/internal/*`, not proxied by nginx). Binary, so no base64 round trip |
 | `Postgres PGVector Store` | `@n8n/n8n-nodes-langchain.vectorStorePGVector` (1.3) | mode **insert**, table `chunks`, default columns `id, text, metadata, embedding`, credential `Hotel Postgres` | Writes into the pre-created `chunks` table (LangChain layout; do not rename columns) |
-| `Default Data Loader` | `@n8n/n8n-nodes-langchain.documentDefaultDataLoader` (1.1) | binary, loader `pdfLoader`, binary key `data`; metadata `document_id` and `filename` taken from the Webhook body | Stamps every chunk with `document_id`; retrieval and purge both filter on it |
+| `Default Data Loader` | `@n8n/n8n-nodes-langchain.documentDefaultDataLoader` (1.1) | binary, loader `pdfLoader`, binary key `data`; metadata `document_id` and `filename` taken from the Webhook body | Stamps every chunk with `document_id`; retrieval and the API's purge both filter on it |
 | `Recursive Character Text Splitter` | `@n8n/n8n-nodes-langchain.textSplitterRecursiveCharacterTextSplitter` (1) | `chunkSize 1000`, `chunkOverlap 150` | Overlap keeps a sentence that straddles a boundary retrievable from either chunk |
 | `Embeddings OpenAI` | `@n8n/n8n-nodes-langchain.embeddingsOpenAi` (1.2) | model `text-embedding-3-small` (1536 dims), credential `OpenAI account`, retry on fail: 3 tries, 2 s wait | Must match `vector(1536)` in the schema. Retries absorb transient OpenAI errors |
-| `Purge old vectors` | `n8n-nodes-base.postgres` (2.8) | `DELETE FROM chunks WHERE metadata->>'document_id' <> $1` (`executeOnce`) | Runs **after** the new chunks are inserted, so a failed ingest never leaves the knowledge base empty |
-| `Count chunks` | `n8n-nodes-base.postgres` (2.8) | `SELECT count(*)::int AS chunk_count FROM chunks WHERE metadata->>'document_id' = $1` | Reports how many chunks the document produced |
+| `Count chunks` | `n8n-nodes-base.postgres` (2.8) | `SELECT count(*)::int AS chunk_count FROM chunks WHERE metadata->>'document_id' = $1` (`executeOnce`) | Reports how many chunks the document produced. Counts only this `document_id`, so old chunks that are still present don't inflate it |
 | `Respond to Webhook` | `n8n-nodes-base.respondToWebhook` (1.5) | JSON `{ ok: true, document_id, chunk_count }` | Response the API stores on the document row |
 
-Any node error makes n8n return HTTP 500; the API then marks the document `failed` and answers `502 INGEST_FAILED`
-(the previously active document stays active).
+Any node error makes n8n return HTTP 500. The API runs the ingest in the background after answering the upload with
+`202`, so it marks the document `failed`, deletes its partial chunks and reports the error to the dashboard as
+`pendingDocument.error` (the previously active document stays active).
 
 ## WF2 `02-chat-answer` (path `hotel/chat`)
 
@@ -51,7 +55,7 @@ Any node error makes n8n return HTTP 500; the API then marks the document `faile
 Webhook → Extract (Set) → Postgres PGVector Store [Get Many, top 6, filter document_id] (+ Embeddings OpenAI)
         → Build context (Code) → Has context? (IF n_chunks > 0)
               ├─ true  → Basic LLM Chain (+ OpenAI Chat Model gpt-4.1-mini, temp 0, 600 tokens
-              │                           + Structured Output Parser, auto-fix on) → Guard & finalize
+              │                           + Structured Output Parser, auto-fix off) → Guard & finalize
               └─ false ───────────────────────────────────────────────────────────→ Guard & finalize
         → Respond to Webhook { answer, category, answered, sources, model }
 ```
@@ -62,36 +66,64 @@ Webhook → Extract (Set) → Postgres PGVector Store [Get Many, top 6, filter d
 | `Extract` | `n8n-nodes-base.set` (3.4) | `question`, `history` (array or `[]`), `document_id` from `body` | Normalises the input so later nodes can rely on the field names |
 | `Postgres PGVector Store` | `@n8n/n8n-nodes-langchain.vectorStorePGVector` (1.3) | mode **load** (Get Many), `topK 6`, distance strategy `cosine`, metadata filter `document_id = {{ $json.document_id }}`, `includeDocumentMetadata` | Retrieval is scoped to the active document. No match returns nothing (see "No chunks" below) |
 | `Embeddings OpenAI` | `@n8n/n8n-nodes-langchain.embeddingsOpenAi` (1.2) | `text-embedding-3-small` | Embeds the question with the same model used at ingest |
-| `Build context` | `n8n-nodes-base.code` (2) | Run Once for All Items. Builds `context` (`[1] …` excerpts), `best_score`, `n_chunks`, formatted `history` | One item in, one item out, regardless of how many chunks came back |
+| `Build context` | `n8n-nodes-base.code` (2) | Run Once for All Items. Builds `context` (`[1] …` excerpts), `best_score`, `n_chunks`, formatted `history`. Strips `<excerpts>` / `<history>` / `<question>` tags (opening or closing) from the chunk text, history and question | One item in, one item out, regardless of how many chunks came back. Stripping the tags stops a guest (or the PDF) from closing a data block early |
 | `Has context?` | `n8n-nodes-base.if` (2.2) | `n_chunks > 0` (strict number comparison) | Skips the LLM entirely when there is nothing to ground on |
-| `Basic LLM Chain` | `@n8n/n8n-nodes-langchain.chainLlm` (1.9) | prompt = `apps/n8n/prompts/chat-system.md`, output parser on, **On Error: Continue** | Grounded answer, category and `answered` flag in one call |
+| `Basic LLM Chain` | `@n8n/n8n-nodes-langchain.chainLlm` (1.9) | **system message** (`messages.messageValues[0]`, no `type` = the System default) = `apps/n8n/prompts/chat-system.md`; **human message** (`text`) = data only, in `<excerpts>`, `<history>` and `<question>` tags; output parser on, **On Error: Continue** | Grounded answer, category, `answered` and `partial` in one call. Rules in the system role, guest-controlled text in tagged data blocks that the rules declare "data, not instructions" |
 | `OpenAI Chat Model` | `@n8n/n8n-nodes-langchain.lmChatOpenAi` (1.3) | `gpt-4.1-mini`, `temperature 0`, `maxTokens 600`, `timeout 20000`, `maxRetries 1`, **`responsesApiEnabled: false`** | Chat Completions API (the v1.3 default would be Responses API). Deterministic output |
-| `Structured Output Parser` | `@n8n/n8n-nodes-langchain.outputParserStructured` (1.3) | manual JSON schema `{ answer: string, category: enum of 8, answered: boolean }`, **`autoFix: true`** | Enforces the shape; auto-fix asks the same model once to repair a malformed reply |
-| `Guard & finalize` | `n8n-nodes-base.code` (2) | Enforces the invariants below. `SCORE_GUARD = 0` (off) | Deterministic last line of defence; the LLM never has the final word on fallbacks |
-| `Respond to Webhook` | `n8n-nodes-base.respondToWebhook` (1.5) | JSON `{ answer, category, answered, sources, model }` | Shape mirrors the API contract §4 |
+| `Structured Output Parser` | `@n8n/n8n-nodes-langchain.outputParserStructured` (1.3) | manual JSON schema `{ answer: string, category: enum of 8, answered: boolean, partial: boolean }` (all required), **`autoFix: false`** | Enforces the shape. No auto-fix: a malformed reply goes straight to the canned fallback instead of a second, unguarded model call that sees the guest's text again |
+| `Guard & finalize` | `n8n-nodes-base.code` (2) | Enforces the invariants below, including the partial-answer rule. `SCORE_GUARD = 0` (off). Also returns `partial` and `guard_reason` (for the execution log) | Deterministic last line of defence; the LLM never has the final word on fallbacks |
+| `Respond to Webhook` | `n8n-nodes-base.respondToWebhook` (1.5) | JSON `{ answer, category, answered, sources, model }` | Shape mirrors the API contract §4 (`partial` stays internal; a partial answer is `answered:false`) |
 
 
-- **Prompt sync.** `apps/n8n/prompts/chat-system.md` is the source of truth for the wording. n8n cannot read
-  the file at runtime, so its text is embedded in the *Basic LLM Chain* node's prompt, with
-  `{{ context }}` / `{{ history }}` / `{{ question }}` replaced by
-  `{{ $('Build context').first().json.<field> }}`. **Edit both together**: if you change the `.md`, paste the
-  same text into the node (or edit the JSON) and re-export. Quick check that they still match:
+- **Prompt sync.** `apps/n8n/prompts/chat-system.md` is the source of truth for the rules. n8n cannot read
+  the file at runtime, so its text is embedded verbatim as the *Basic LLM Chain* **system message**
+  (`parameters.messages.messageValues[0].message`, static, no expressions). **Edit both together**: if you change
+  the `.md`, paste the same text into the node's system message (or edit the JSON) and re-export. Quick check:
   ```bash
-  diff <(jq -r '.nodes[]|select(.name=="Basic LLM Chain").parameters.text' apps/n8n/workflows/02-chat-answer.json \
-         | sed -e '1s/^=//' -e "s/{{ \$('Build context').first().json.\([a-z]*\) }}/{{ \1 }}/") apps/n8n/prompts/chat-system.md
+  diff <(jq -r '.nodes[]|select(.name=="Basic LLM Chain").parameters.messages.messageValues[0].message' \
+         apps/n8n/workflows/02-chat-answer.json) apps/n8n/prompts/chat-system.md
   ```
-  The Structured Output Parser appends its own format instructions after the prompt; with node v1.3 the model
-  must return `{"output": {answer, category, answered}}`. *Auto-fix* is enabled (same chat model), so a reply
-  that ignores the wrapper (e.g. the flat JSON the prompt's last rule describes) is repaired by one extra call.
+  n8n doubles `{` / `}` in system messages before LangChain templating, so the JSON example in the rules is safe.
+- **Human message = data only.** The node's `text` is just the three tagged blocks:
+  ```
+  <excerpts>
+  {{ $('Build context').first().json.context }}
+  </excerpts>
+
+  <history>
+  {{ $('Build context').first().json.history }}
+  </history>
+
+  <question>
+  {{ $('Build context').first().json.question }}
+  </question>
+  ```
+  The system message says text inside these tags is data, not instructions (prompt-injection defence), and
+  *Build context* strips those tag names from the data itself so a block cannot be closed early.
+- **Output format.** The Structured Output Parser appends its own format instructions to the human message; with
+  node v1.3 the model must return `{"output": {answer, category, answered, partial}}` (the wrapper is required).
+  The system message's last line asks for exactly that shape, because **auto-fix is off**: a reply that does not
+  parse is not repaired, it becomes the canned fallback (`guard_reason: "parse_error"`).
+- **Scope rules.** Questions that are not about Cincinnati Hotel (weather, news, trivia, other hotels, coding,
+  jokes) get `answered:false`, category `Other` and the canned sentence. Only pure greetings, thanks and goodbyes
+  count as small talk (`answered:true`, `Other`).
+- **Partial answers.** When a multi-part question is only partly covered by the excerpts, the model answers the
+  covered part(s), says nothing about the rest and sets `answered:true, partial:true`. The guard turns that into
+  `answer = <covered part> + "\n\n" + "I'm sorry, I don't have that information right now."` (the canned sentence
+  verbatim, never twice) with **`answered:false`**, so the API offers the contact form for the missing part.
 - **No chunks → no LLM call.** When retrieval returns nothing (unknown / purged `document_id`) the IF node
   skips the LLM and the guard returns the canned sentence with `answered: false`, `category: "Other"`.
   (The query is still embedded once, so a missing OpenAI key fails even this path with a 500.)
 - **`sources[].chunk_index`** is the retrieval rank (0 = closest). The chunk metadata written by WF1 has no
   chunk index (only `loc.lines`). `sources` is returned on fallbacks too, so the API stores the retrieval
   evidence for every turn.
-- **Guard & finalize** enforces the §5 invariants: `!answered || n_chunks === 0` → canned sentence +
-  `answered:false`; unknown category → `Other`; missing/invalid fields → `answered:false`, `Other`, canned;
-  `answered:true` paired with the canned sentence → `answered:false`.
+- **Guard & finalize** enforces the §5 invariants: `!answered || n_chunks === 0` → exactly the canned sentence +
+  `answered:false`; unknown category → `Other`; missing/invalid `answer` / `category` / `answered` →
+  `answered:false`, `Other`, canned (a missing or non-boolean `partial` just counts as `false`); a full
+  (`partial:false`) `answered:true` paired with the canned sentence → `answered:false`, canned; a partial answer
+  that is only the canned sentence → plain unanswered; the score guard (when on) also cancels partial answers;
+  `answered:true, partial:true` → covered text + `\n\n` + canned, `answered:false`, `partial:true`,
+  `guard_reason: "partial"`.
 
 ### Error handling decision
 
@@ -100,14 +132,14 @@ as `{ error: "<message>" }`. The guard tells two kinds apart:
 
 | Failure | Detected by | Result |
 |---|---|---|
-| Model output unusable (invalid JSON, wrong shape, empty) even after auto-fix | message matches `doesn't fit required format` / `empty response to the Structured Output Parser` / `Failed to parse` / `Unable to parse` | HTTP 200, canned sentence, `answered:false`, `Other`. The guest is offered the contact form. |
+| Model output unusable (invalid JSON, wrong shape, empty; auto-fix is off) | message matches `doesn't fit required format` / `empty response to the Structured Output Parser` / `Failed to parse` / `Unable to parse` | HTTP 200, canned sentence, `answered:false`, `Other`. The guest is offered the contact form. |
 | OpenAI auth / quota / rate limit / network / timeout (anything else) | any other message | The guard **throws**, the execution fails, the webhook returns **HTTP 500**, and the API answers **502 `ASSISTANT_UNAVAILABLE`** (retry in the UI). |
 
 Rationale: an outage is not a "the hotel doesn't have that information" answer. Turning it into a fallback would
 wrongly offer the contact form and record an unanswered question in the stats. Embeddings and retrieval
 failures are not caught at all (they also produce a 500). Verified with a fake OpenAI server: a 401 gives HTTP 500
-(`LLM call failed: Authorization failed - please check your credentials`), garbage output gives the canned 200,
-and an unwrapped JSON reply is recovered by auto-fix.
+(`LLM call failed: Authorization failed - please check your credentials`) and garbage output gives the canned 200.
+(That run predates turning auto-fix off; with it off, an unwrapped flat JSON reply also gives the canned 200.)
 
 Timeouts: the chat model uses `timeout: 20000` and `maxRetries: 1`. The API aborts at 30 s (→ 502).
 
@@ -125,7 +157,7 @@ Webhook → Summarize (Basic LLM Chain, + OpenAI Chat Model gpt-4.1-mini, temp 0
 | `Webhook` | `n8n-nodes-base.webhook` (2.2) | `POST`, path `hotel/lead`, Header Auth (`Hotel Webhook Secret`) | Same authentication as the other workflows |
 | `Summarize` | `@n8n/n8n-nodes-langchain.chainLlm` (1.9) | system text = `apps/n8n/prompts/lead-summary.md` (plain text: SUMMARY + UNANSWERED QUESTIONS), **On Error: Continue** | If the LLM fails the email still goes out with the raw transcript |
 | `OpenAI Chat Model` | `@n8n/n8n-nodes-langchain.lmChatOpenAi` (1.3) | `gpt-4.1-mini`, temperature `0.2`, credential `OpenAI account`. Uses the **Responses API** (`/v1/responses`) by default in this workflow | Cheap summarisation; Responses API is the node default in v1.3 (WF2 turns it off explicitly, see the WF2 table) |
-| `Compose email` | `n8n-nodes-base.code` (2) | Builds `subject`, `html`, `text` and the Resend `payload`: lead details, summary, highlighted unanswered question, full transcript. `FROM` and `TO` are read from `${EMAIL_FROM}` / `${LEAD_TO}`. Throws if `LEAD_TO` or `EMAIL_FROM` is empty | Fails fast on bad config instead of sending to nobody. Address placeholders are substituted by `n8n-import.sh` only |
+| `Compose email` | `n8n-nodes-base.code` (2) | Builds `subject`, `html`, `text` and the Resend `payload`: lead details, summary, highlighted unanswered question, full transcript. `FROM` and `TO` come from the placeholders `${EMAIL_FROM_JSON}` / `${LEAD_TO_JSON}`, which the import script replaces with complete JS string literals. Throws if `LEAD_TO` or `EMAIL_FROM` is empty | Fails fast on bad config instead of sending to nobody. Address placeholders are substituted by `apps/n8n/scripts/import.sh` only; quotes, apostrophes and backslashes in the values are safe |
 | `Send via Resend` | `n8n-nodes-base.httpRequest` (4.5) | `POST https://api.resend.com/emails`, JSON body `{{ JSON.stringify($json.payload) }}`, Header Auth `Resend` (`Authorization: Bearer …`) | Resend's REST API; `reply_to` is the guest's address so reviewers can reply directly |
 | `Respond to Webhook` | `n8n-nodes-base.respondToWebhook` (1.5) | JSON `{ ok: true, email_id, summary }` | `email_id` is what the API checks; a Resend error makes this node's execution fail with HTTP 500, and the API marks the lead `emailStatus: failed` |
 
@@ -166,15 +198,12 @@ The groups **do not separate**: the worst answered question ("Are pets allowed?"
 unanswered one ("Does the hotel have a casino?", 0.579). A distance cutoff can't tell them apart, so
 `SCORE_GUARD` stays `0`. The grounded prompt alone scored 10/10 on `answered`. If you want a pure safety net
 against wild retrievals, `0.75` is the loosest cutoff that keeps every answerable question in this set.
->
-> | group | best_score values (cosine distance) |
-> |---|---|
-> | expected answered (6) | _TBD_ |
-> | expected unanswered (4) | _TBD_ |
+(The calibration covers the original ten questions; the off-topic, injection and partial questions added to
+`questions.json` later are not in it.)
 
 ## Credentials
 
-Created by `n8n-import.sh` from [`credentials.template.json`](credentials.template.json). The `${VAR}`
+Created by `apps/n8n/scripts/import.sh` from [`credentials.template.json`](credentials.template.json). The `${VAR}`
 placeholders are filled with `envsubst` from `.env`. The filled file is streamed straight into the container
 (`/tmp/hotel-import`, mode 700) and is never written to the host. Fixed credential ids, referenced by the workflows:
 
@@ -224,8 +253,13 @@ COMPOSE_FILES="compose.yml" ENV_FILE=.env bash apps/n8n/scripts/import.sh   # ex
 - Warns (does not fail) when `OPENAI_API_KEY` or `RESEND_API_KEY` is empty. The credentials are then imported empty,
   and the chat or lead flows fail until you fill `.env` and re-run.
 - Fails when `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` or `N8N_WEBHOOK_SECRET` is empty.
-- In `03-*.json` only, `${EMAIL_FROM}` and `${LEAD_TO}` are substituted (values JSON-escaped). Other files are copied as-is.
-  `LEAD_TO` is a comma-separated list.
+- In `03-*.json` only, `${EMAIL_FROM_JSON}` and `${LEAD_TO_JSON}` are substituted with the `.env` values
+  `EMAIL_FROM` / `LEAD_TO`. Other files are copied as-is. `LEAD_TO` is a comma-separated list.
+  The placeholders sit unquoted in the *Compose email* code (`const FROM = String(${EMAIL_FROM_JSON}).trim();`).
+  `js_literal_in_json` turns the value into a JS string literal with `jq -Rs .` (quotes included, `"` and `\`
+  escaped) and then JSON-escapes that literal once more with `json_escape`, because it lands inside the `jsCode`
+  JSON string. So `Cincinnati Hotel's "Desk" <desk@…>` ends up as the JS source
+  `"Cincinnati Hotel's \"Desk\" <desk@…>"`; no character in the value can end the string early.
 - Steps: credentials → `n8n import:credentials` → stage each workflow → `n8n import:workflow --separate` →
   `n8n publish:workflow --id=<id>` for each workflow → remove the temp files → restart n8n → wait for `/healthz` →
   verify with `n8n list:workflow --active=true --onlyId`.
@@ -248,10 +282,12 @@ Then rename the exported files to the canonical names `01-ingest-pdf.json`, `02-
 Before you commit:
 
 - **Re-exported WF3 contains the substituted addresses** (from `.env`) in the `Compose email` code node. Restore the
-  placeholders `${EMAIL_FROM}` and `${LEAD_TO}` there, so no real address enters git. Use `git diff` to check.
+  placeholders `const FROM = String(${EMAIL_FROM_JSON}).trim();` and `const TO = String(${LEAD_TO_JSON})…` there,
+  so no real address enters git. Use `git diff` to check (`pnpm --filter n8n test` fails on any committed address).
 - Check that every file still has a top-level `"id"`, and that `"active"` is not used as a reason to change
   anything. Activation is handled by the import script.
-- If you change `apps/n8n/prompts/*.md`, update the node text as well (see the prompt sync check in the WF2 section).
+- If you change `apps/n8n/prompts/*.md`, update the node's system message as well (see the prompt sync check in the
+  WF2 section).
 
 ## Changing the OpenAI model
 
@@ -294,13 +330,20 @@ Also update the API if the response id field changes, and rerun `pnpm e2e:real` 
 
 - `pnpm --filter n8n test` (Vitest, `test/workflows.test.ts`, no n8n needed): the three files parse and have fixed ids,
   each webhook is `hotel/*` with header auth, no inline API keys, the Structured Output Parser enum and the Guard
-  constants match `apps/api/src/lib/categories.ts`, the WF2 prompt matches `prompts/chat-system.md` (the sync check
-  above, automated), `03-*` keeps the `${EMAIL_FROM}` / `${LEAD_TO}` placeholders, and every credential a node
+  constants match `apps/api/src/lib/categories.ts`, the WF2 system message matches `prompts/chat-system.md` (the
+  sync check above, automated) and contains the "data, not instructions" rule, the human message is exactly the
+  tagged data, the parser requires `partial` with auto-fix off, the *Guard & finalize* code is executed with stubbed
+  n8n globals (full, partial, canned, parse-error and LLM-error cases), WF1 has no `DELETE` node and still returns
+  `chunk_count`, `03-*` keeps the `${EMAIL_FROM_JSON}` / `${LEAD_TO_JSON}` placeholders (no real address committed,
+  and a sender with quotes and an apostrophe survives the import-script escaping), and every credential a node
   references exists in `credentials.template.json`.
 - `pnpm e2e:real` runs `e2e/tests/real/chat-eval.spec.ts`, which posts `docs/sample/questions.json` straight to the
-  WF2 webhook. It prints question, expected, actual, category and `best_score` as a table, then asserts at least 9 of
-  10 answered flags match, that `hi there!` gives `answered=true` with `Other`, and that a random `document_id` gives
-  the canned sentence. It is skipped when the API runs in mock mode.
+  WF2 webhook. It prints question, expected, actual, category and `best_score` as a table, then asserts that all but
+  one `answered` flag match (13 of 14). Questions marked `"expect": "canned"` (weather, World Cup, an injection
+  attempt) must return exactly the canned sentence. The `"expect": "partial"` question (pool hours + helipad) must
+  return `answered=false` with the pool hours (`answerMatches`) followed by the canned sentence, at the webhook and
+  through the API (`offerContactForm: true`). It also checks that `hi there!` gives `answered=true` with `Other`, and
+  that a random `document_id` gives the canned sentence. It is skipped when the API runs in mock mode.
 - The same run includes `e2e/tests/real/lead.spec.ts`, which posts a fake lead to WF3. It is skipped when
   `LEAD_TO` is empty or contains a reviewer address, and passes when the response has `ok: true` and a non-empty
   `email_id`.
@@ -315,6 +358,6 @@ Also update the API if the response id field changes, and rerun `pnpm e2e:real` 
 | Chat returns **502** `ASSISTANT_UNAVAILABLE` | WF2 failed with a non-format error: OpenAI key missing or wrong, quota, rate limit, network or timeout (n8n returns 500) | Check the `OpenAI account` key and the n8n execution log at `https://n8n.<domain>` (or `http://localhost:5678` in dev). Retry in the UI |
 | Upload returns **502** `INGEST_FAILED` | WF1 failed (download, PDF parsing, or embeddings) | Open the failing execution in the n8n Executions list to see which node failed |
 | Lead returns `emailStatus: failed` | WF3 failed, usually Resend key wrong, sender domain not verified in Resend, or `LEAD_TO` / `EMAIL_FROM` empty (`Compose email` throws) | Check `RESEND_API_KEY`, `EMAIL_FROM` and `LEAD_TO` in `.env`, re-run the import script, then `lead.spec.ts` |
-| `Basic LLM Chain` says the output "doesn't fit required format" | Model reply is malformed even after auto-fix | Expected to resolve to the canned sentence (HTTP 200). If it happens often, check the prompt and the model |
+| `Basic LLM Chain` says the output "doesn't fit required format" | Model reply is malformed (auto-fix is off, so there is no repair call) | Expected to resolve to the canned sentence (HTTP 200). If it happens often, check the prompt and the model |
 | Import warns `OPENAI_API_KEY is EMPTY` | `.env` has no key | Fill the key and re-run. The credential was imported empty |
 | Import fails with `… is empty in .env` | A required variable is missing | Fill the variable in `.env` (CRLF line endings are tolerated) |
