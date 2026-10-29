@@ -1,12 +1,12 @@
 # Runbook
 
 Everything needed to run, test, deploy and extend the Cincinnati Hotel chatbot. Architecture and contracts:
-[`ARCHITECTURE.md`](ARCHITECTURE.md). Workflow reference: [`../n8n/README.md`](../n8n/README.md). Sprint history:
+[`ARCHITECTURE.md`](ARCHITECTURE.md). Workflow reference: [`../apps/n8n/README.md`](../apps/n8n/README.md). Sprint history:
 [`../sprints/README.md`](../sprints/README.md).
 
 Contents: [Prerequisites](#prerequisites) · [Environment variables](#environment-variables) · [Local run, mock mode](#local-run-mock-mode) ·
 [Local run, real mode](#local-run-real-mode) · [Development without containers](#development-without-containers) ·
-[n8n first run and import](#n8n-first-run-and-import) · [Smoke test](#smoke-test) · [End-to-end tests (Playwright)](#end-to-end-tests-playwright) ·
+[n8n first run and import](#n8n-first-run-and-import) · [Tests](#tests) ·
 [Deploy to a VPS](#deploy-to-a-vps) · [Extending](#extending) · [Troubleshooting](#troubleshooting)
 
 ## Prerequisites
@@ -14,10 +14,10 @@ Contents: [Prerequisites](#prerequisites) · [Environment variables](#environmen
 | Need | Why | Notes |
 |---|---|---|
 | Docker Engine or Docker Desktop with Compose v2 | Runs postgres, n8n, api, web (and cloudflared in production) | `docker compose version` must work |
-| Git Bash on Windows (or any bash on Linux/macOS) | Runs the `infra/scripts/*.sh` scripts | On Windows use Git Bash, not PowerShell |
-| `jq` | Used by `smoke.sh`, `chat-eval.sh`, `lead-test.sh`, `n8n-import.sh` | Windows: put `jq.exe` on `PATH`. Debian/Ubuntu: `apt-get install jq` |
-| `envsubst` (GNU gettext) | `n8n-import.sh` fills the credential template with it | Debian/Ubuntu: `apt-get install gettext-base`. Git Bash: must be on `PATH`; the script stops with a message if it is missing |
-| Node.js 22 and pnpm 11 | Only for `pnpm dev`, builds, typecheck and Playwright | Containers use `node:22-alpine`, so Node is not needed to run the stack |
+| Git Bash on Windows (or any bash on Linux/macOS) | Runs `apps/n8n/scripts/import.sh` and `infra/scripts/deploy.sh` | On Windows use Git Bash, not PowerShell |
+| `jq` | Used by the n8n import and deploy scripts | Windows: put `jq.exe` on `PATH`. Debian/Ubuntu: `apt-get install jq` |
+| `envsubst` (GNU gettext) | The n8n import fills the credential template with it | Debian/Ubuntu: `apt-get install gettext-base`. Git Bash: must be on `PATH`; the script stops with a message if it is missing |
+| Node.js 22 and pnpm 11 (`corepack enable`) | `pnpm dev`, builds, typecheck, Vitest and Playwright (Turborepo runs them) | Containers use `node:22-alpine`, so Node is not needed to run the stack itself |
 | OpenAI API key | Real mode only: embeddings and chat | Not needed in mock mode |
 | Resend API key and a verified sender domain | Real mode only: lead emails | `EMAIL_FROM` must use a domain verified in Resend |
 | Cloudflare account with a domain and a tunnel | Production only | See [`infra/cloudflared/README.md`](../infra/cloudflared/README.md) |
@@ -64,34 +64,37 @@ Ports are a dev concern: the production compose file publishes nothing; only the
 ## Local run, mock mode
 
 Mock mode needs no OpenAI or Resend keys. The API answers ingest, chat and lead calls in-process, so n8n is not used
-for answers. Use it to check the stack, the UI and the smoke test.
+for answers. Use it to check the stack, the UI and the end-to-end tests.
 
 1. Fill `.env`: `POSTGRES_PASSWORD`, `N8N_ENCRYPTION_KEY`, `N8N_WEBHOOK_SECRET`, and set `N8N_MOCK=1`. Keep `N8N_VERSION=2.45.5`.
-2. Start the stack. Compose needs `--env-file .env` because the compose files live in `infra/`:
+2. Start the stack from the repo root. Compose picks up `compose.yml`, `compose.override.yml` (dev ports) and `.env`
+   by itself:
 
    ```bash
-   docker compose --env-file .env -f infra/docker-compose.yml -f infra/compose.override.yml up -d --build
-   docker compose --env-file .env -f infra/docker-compose.yml ps        # wait for "healthy"
+   docker compose up -d --build --wait     # returns once every service is healthy
+   docker compose ps
    ```
 
 3. Open <http://localhost:8080>. On Windows, if another program holds IPv4 port 8080, use <http://[::1]:8080> instead
    (see [Troubleshooting](#troubleshooting)).
-4. Run the mock smoke test:
+4. Run the end-to-end tests (see [Tests](#tests)):
 
    ```bash
-   bash infra/scripts/smoke.sh --base http://localhost:8080 --mock
+   pnpm install && pnpm --filter e2e browsers   # once
+   pnpm e2e
    ```
 
-   It should end with `SMOKE PASS (mode=mock, base=http://localhost:8080)`. Mock ingest reports 42 chunks.
+   Mock ingest reports 42 chunks; the guest journey asserts the `[mock]` answer text.
 
-To leave mock mode, set `N8N_MOCK=0` and recreate the API: `docker compose --env-file .env -f infra/docker-compose.yml -f infra/compose.override.yml up -d api`.
+To leave mock mode, set `N8N_MOCK=0` and recreate the API: `docker compose up -d api`. For a one-off mock run without
+editing `.env`, a shell variable wins over `.env`: `N8N_MOCK=1 docker compose up -d api`.
 
 ## Local run, real mode
 
 Real mode sends embeddings and chat to OpenAI, and lead emails through Resend.
 
 1. Fill `.env` with `OPENAI_API_KEY`, `RESEND_API_KEY`, `EMAIL_FROM`, and `LEAD_TO` set to **your own inbox**. Keep `N8N_MOCK=0`.
-2. Start the stack (same command as mock mode, with the same `--env-file .env` and both `-f` files).
+2. Start the stack (same command as mock mode): `docker compose up -d --build --wait`.
 3. Create the n8n owner account and import the workflows. See [n8n first run and import](#n8n-first-run-and-import).
 4. Upload the sample PDF. Generate it with `pnpm sample:pdf` if `docs/sample/cincinnati-hotel.pdf` is missing, then open
    <http://localhost:8080/admin> and upload it. Wait for the status to read **Ready**. Or from the shell:
@@ -100,29 +103,16 @@ Real mode sends embeddings and chat to OpenAI, and lead emails through Resend.
    curl -F file=@docs/sample/cincinnati-hotel.pdf http://localhost:8080/api/admin/document
    ```
 
-5. Check the answers against the accuracy set:
+5. Run the real-mode tests (this uploads the sample PDF again and sends two real lead emails to `LEAD_TO`):
 
    ```bash
-   bash infra/scripts/chat-eval.sh
+   pnpm e2e:real
    ```
 
-   It prints question, expected, actual, category and `best_score` for each question, and passes when at least 9 of
-   the 10 `answered` flags match.
-
-6. Run the full smoke test (this sends one real lead email to `LEAD_TO`):
-
-   ```bash
-   bash infra/scripts/smoke.sh --base http://localhost:8080
-   ```
-
-7. Test the lead flow on its own, once `LEAD_TO` is your inbox:
-
-   ```bash
-   bash infra/scripts/lead-test.sh
-   ```
-
-   It refuses to run if `LEAD_TO` is empty or contains a reviewer address, so a test cannot go to the wrong inbox.
-   It passes when n8n returns `ok: true` and an `email_id`.
+   On top of the HTTP and UI checks it runs the accuracy set (`apps/e2e/tests/real/chat-eval.spec.ts`): it prints
+   question, expected, actual, category and `best_score` for each question, and passes when at least 9 of the 10
+   `answered` flags match. The lead spec posts straight to the WF3 webhook and passes when n8n returns `ok: true` and
+   an `email_id`. Both lead tests skip themselves when `LEAD_TO` is empty or contains a reviewer address.
 
 Useful links in local mode: web <http://localhost:8080>, n8n editor <http://localhost:5678>, API health
 <http://localhost:8080/api/health>.
@@ -134,7 +124,7 @@ Use this for hot reload on the API and the web app. Postgres and n8n still run i
 1. Start the two backing services:
 
    ```bash
-   docker compose --env-file .env -f infra/docker-compose.yml up -d postgres n8n
+   docker compose up -d postgres n8n
    ```
 
    The owner account and workflow import are still needed for real mode. See [n8n first run and import](#n8n-first-run-and-import).
@@ -182,59 +172,63 @@ shell or `.env` for this one call. A second call fails because the owner already
 **Import:**
 
 ```bash
-bash infra/scripts/n8n-import.sh            # dev: uses infra/docker-compose.yml and the override
-bash infra/scripts/n8n-import.sh --prod     # VPS: infra/docker-compose.yml only
+pnpm n8n:import            # dev: uses compose.yml and the override
+bash apps/n8n/scripts/import.sh --prod     # VPS: compose.yml only
 ```
 
 The script loads `.env`, imports the four credentials, imports the three workflows, publishes each one, restarts n8n
 and checks that the three are active. It is safe to re-run; ids are fixed. The filled credentials are streamed into the
 container and never written to the host. For what each step does and the activation rule for n8n 2.x, see the
-"Import" section of [`../n8n/README.md`](../n8n/README.md).
+"Import" section of [`../apps/n8n/README.md`](../apps/n8n/README.md).
 
 Verify activation by hand:
 
 ```bash
-docker compose --env-file .env -f infra/docker-compose.yml exec -T n8n n8n list:workflow --active=true --onlyId
+docker compose exec -T n8n n8n list:workflow --active=true --onlyId
 ```
 
 The three ids `hotelIngestPdf01`, `hotelChatAnswr02` and `hotelLeadEmail03` should be listed.
 
-## Smoke test
+## Tests
 
-`infra/scripts/smoke.sh` runs the end-to-end checks from [`ARCHITECTURE.md`](ARCHITECTURE.md) §8 against a running
-stack. Health always runs first.
+Turborepo runs every package's scripts from the root. Two layers:
 
-| Option | Meaning |
+**Unit and contract tests (Vitest, no stack needed)**: `pnpm test`
+
+| Package | What it checks |
 |---|---|
-| `--base URL` | Where to run it. Default `http://localhost:8080` |
-| `--mock` | Mock mode: relaxes content checks (chunk count 42, any valid category) |
-| `--only upload,chat,lead,stats,sse` | Run only these steps |
+| `apps/api/test/` | Config validation, the n8n client (mock and HTTP, error mapping), routes through `buildApp` + `app.inject()` with the DB mocked (error envelope, `NO_DOCUMENT`, contact-form flag, leads, `/internal` secret), and the category list against `apps/web` and the `infra/db/01-schema.sql` CHECK constraint |
+| `apps/web/src/lib/*.test.ts` | `api.ts` (URLs, bodies, error envelope → `ApiError`), `format.ts` |
+| `apps/n8n/test/` | Workflow JSON: fixed ids, secret-protected `hotel/*` webhooks, no inline keys, Structured Output Parser enum and Guard constants match the API, `prompts/chat-system.md` matches the prompt embedded in WF2, credential template placeholders |
 
-Examples:
+Run one package with `pnpm --filter api test` (or `web`, `n8n`).
 
-```bash
-bash infra/scripts/smoke.sh --base http://localhost:8080 --mock                 # mock stack
-bash infra/scripts/smoke.sh --base http://localhost:8080                        # real stack
-bash infra/scripts/smoke.sh --base https://hotel.example.com --only upload,chat,stats,sse   # public, no email
-```
+**End-to-end tests (Playwright, `apps/e2e`, needs the running stack)**
 
-The `lead` step posts a real lead, so in real mode it sends an email to `LEAD_TO`. Leave `lead` out of `--only` when
-you do not want that. A passing run ends with `SMOKE PASS`. A failing step prints `FAIL <step>: <reason>` and exits
-non-zero.
+| Project | Specs | Runs in |
+|---|---|---|
+| `api` | `tests/api/smoke.spec.ts`: health, upload the sample PDF, answerable + unanswerable chat, error envelope, lead, stats, SSE | `pnpm e2e` and `pnpm e2e:real` |
+| `ui` | `tests/ui/user-journey.spec.ts` (mock only), `tests/ui/admin-realtime.spec.ts` | both |
+| `real` | `tests/real/chat-eval.spec.ts` (accuracy set straight to the WF2 webhook), `tests/real/lead.spec.ts` (WF3 + Resend) | `pnpm e2e:real` only; skipped when the API is in mock mode |
 
-## End-to-end tests (Playwright)
-
-Two specs, in `apps/web/e2e/`: a guest journey (ask a question, get the fallback, leave contact details) and an admin
-realtime check (the "Questions asked" number changes on the dashboard without a reload, across two pages).
+`ui` and `real` depend on `api`, so the sample PDF is always uploaded first. The suite detects mock mode from
+`/api/health` (`n8n: "mock"`) and relaxes content checks there. It reads `N8N_WEBHOOK_SECRET` and `LEAD_TO` from the
+root `.env`.
 
 ```bash
-cd apps/web
-pnpm exec playwright install chromium     # once per machine
-E2E_BASE_URL='http://localhost:8080' pnpm e2e
+pnpm --filter e2e browsers                                   # once per machine
+pnpm e2e                                                     # mock or real stack, no direct n8n calls
+pnpm e2e:real                                                # adds accuracy + lead webhook (real stack)
+E2E_BASE_URL=https://hotel.example.com pnpm e2e              # against a deployed stack
+pnpm --filter e2e report                                     # open the HTML report of the last run
 ```
 
-Set `E2E_BASE_URL` to the stack you want to test. On Windows, if `localhost` reaches another program, use
-`E2E_BASE_URL='http://[::1]:8080'`. The config defaults to `http://localhost:8080`.
+| Variable | Default | Meaning |
+|---|---|---|
+| `E2E_BASE_URL` | `http://localhost:8080` | Web app (nginx) to test. On Windows, if `localhost` reaches another program, use `http://[::1]:8080` |
+| `E2E_N8N_URL` | `http://localhost:5678` | n8n for the `real` project (published by `compose.override.yml`) |
+
+In real mode the smoke spec's lead step sends one email to `LEAD_TO`, and `lead.spec.ts` sends a second one.
 
 ## Deploy to a VPS
 
@@ -252,14 +246,18 @@ Before you start, create the tunnel and its two public hostnames in the Cloudfla
 3. **Create `.env`** from `.env.example` on the VPS. Fill in `POSTGRES_PASSWORD`, `N8N_ENCRYPTION_KEY`,
    `N8N_WEBHOOK_SECRET`, `N8N_HOST=n8n.<domain>`, `PUBLIC_WEB_HOST=hotel.<domain>`, `CLOUDFLARE_TUNNEL_TOKEN`,
    `OPENAI_API_KEY`, `RESEND_API_KEY`, `EMAIL_FROM`, `N8N_MOCK=0`. Set `LEAD_TO` to **your own inbox** until the final
-   reviewer test. Do not put the reviewers' addresses in `LEAD_TO` before that test.
+   reviewer test. Do not put the reviewers' addresses in `LEAD_TO` before that test. Also add
+   `COMPOSE_FILE=compose.yml`: the checkout contains the dev-only `compose.override.yml`, which plain `docker compose`
+   would otherwise merge in (published ports, plain-HTTP n8n). With it set, every `docker compose ...` on the VPS uses
+   the production file only.
 4. **Deploy**: `bash infra/scripts/deploy.sh`. It builds and starts the stack with the tunnel profile, using
-   `docker compose --env-file .env -f infra/docker-compose.yml --profile tunnel up -d --build` (no override file).
+   `docker compose -f compose.yml --profile tunnel up -d --build` (no override file).
 5. **Create the n8n owner account in the UI** at `https://n8n.<domain>`. The local shortcut is for dev only.
-6. **Import the workflows**: `bash infra/scripts/n8n-import.sh --prod`.
+6. **Import the workflows**: `bash apps/n8n/scripts/import.sh --prod`.
 7. **Upload the PDF** at `https://hotel.<domain>/admin` and wait for **Ready**.
-8. **Public smoke test**: `bash infra/scripts/smoke.sh --base https://hotel.<domain>`. This sends one lead email to
-   `LEAD_TO`. Use `--only upload,chat,stats,sse` if you do not want that.
+8. **Public end-to-end test** (from your machine): `E2E_BASE_URL=https://hotel.<domain> pnpm e2e`. In real mode this
+   sends one lead email to `LEAD_TO`. The `real` project needs n8n on `E2E_N8N_URL` with the webhook secret, so run
+   it locally rather than against production.
 
 Afterwards, executions are visible at `https://n8n.<domain>`, and the dashboard is at `https://hotel.<domain>/admin`.
 
@@ -285,23 +283,23 @@ exactly, including `&` and spacing.
      'Location & Transport','Policies','Events','Other','<New category>'));
    ```
 
-4. `n8n/workflows/02-chat-answer.json`: add the value to the `enum` of the **Structured Output Parser** schema. Also add
+4. `apps/n8n/workflows/02-chat-answer.json`: add the value to the `enum` of the **Structured Output Parser** schema. Also add
    it to the `CATEGORIES` array in the **Guard & finalize** code node, or the guard will rewrite it to `Other`.
-5. `n8n/prompts/chat-system.md`: add it to rule 5's list, then paste the same text into the **Basic LLM Chain** node
-   and run the prompt sync check in [`../n8n/README.md`](../n8n/README.md#overview). The `CATEGORIES` list in the Guard
+5. `apps/n8n/prompts/chat-system.md`: add it to rule 5's list, then paste the same text into the **Basic LLM Chain** node
+   and run the prompt sync check in [`../apps/n8n/README.md`](../apps/n8n/README.md#overview). The `CATEGORIES` list in the Guard
    code is the list step 4 describes.
 
-Then re-import with `bash infra/scripts/n8n-import.sh` and rerun `bash infra/scripts/chat-eval.sh`.
+Then re-import with `pnpm n8n:import` and rerun `pnpm e2e:real`.
 
 ### Swap the LLM
 
 - **Same provider, different model.** Change the `model` value of the `OpenAI Chat Model` nodes in WF2 and WF3, and
-  rerun `chat-eval.sh` afterwards, since category and `answered` behaviour depend on the model. For embeddings, change
+  rerun `pnpm e2e:real` afterwards, since category and `answered` behaviour depend on the model. For embeddings, change
   the model in both `Embeddings OpenAI` nodes, but the output must stay **1536 dimensions** to match `vector(1536)`.
   A new embedding model needs a **full re-ingest** of the PDF, because old vectors are not comparable to new ones.
-  Details in [`../n8n/README.md`](../n8n/README.md#changing-the-openai-model).
+  Details in [`../apps/n8n/README.md`](../apps/n8n/README.md#changing-the-openai-model).
 - **Another provider.** The API has no provider code, so only n8n changes: replace the chat and embedding nodes in
-  WF1, WF2 and WF3 with the provider's n8n nodes, add a credential to `n8n/credentials.template.json` and a variable to
+  WF1, WF2 and WF3 with the provider's n8n nodes, add a credential to `apps/n8n/credentials.template.json` and a variable to
   `.env.example`, and update the `OPENAI_API_KEY` check in `n8n-import.sh`, which is hard-coded for OpenAI and only
   warns when it is empty. Keep the output contract of WF2 (`answer`, `category`, `answered`, `sources`) so the API does
   not change. Embedding dimensions must still match the schema, or the schema must change too.
@@ -309,19 +307,17 @@ Then re-import with `bash infra/scripts/n8n-import.sh` and rerun `bash infra/scr
 ### Swap the email provider
 
 The lead email is one code node plus one HTTP node. The steps are in
-[`../n8n/README.md`](../n8n/README.md#changing-the-email-provider): change `Compose email` (payload shape), `Send via
+[`../apps/n8n/README.md`](../apps/n8n/README.md#changing-the-email-provider): change `Compose email` (payload shape), `Send via
 Resend` (URL, auth), the credential template and the environment variable. Keep the response `id` so WF3 can return
-`email_id`. Then run `lead-test.sh` with your own inbox.
+`email_id`. Then run `pnpm e2e:real` with your own inbox in `LEAD_TO`.
 
 ### Re-export workflows after editing in the UI
 
-The files in `n8n/workflows/` are the source of truth. Edit in the n8n editor, then export and copy them back:
+The files in `apps/n8n/workflows/` are the source of truth. Edit in the n8n editor, then export and copy them back:
 
 ```bash
-docker compose --env-file .env -f infra/docker-compose.yml -f infra/compose.override.yml \
-  exec -T n8n n8n export:workflow --all --separate --output=/tmp/wf
-docker compose --env-file .env -f infra/docker-compose.yml -f infra/compose.override.yml \
-  cp n8n:/tmp/wf/. n8n/workflows/
+docker compose exec -T n8n n8n export:workflow --all --separate --output=/tmp/wf
+docker compose cp n8n:/tmp/wf/. apps/n8n/workflows/
 ```
 
 Then rename the exported files to `01-ingest-pdf.json`, `02-chat-answer.json` and `03-lead-email.json`, and check the
@@ -350,7 +346,7 @@ diff before committing:
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| Chat or upload returns `502` and the webhook returns 404 in the n8n log | The workflow is not published | Run `bash infra/scripts/n8n-import.sh` (see [`../n8n/README.md`](../n8n/README.md#troubleshooting)) |
+| Chat or upload returns `502` and the webhook returns 404 in the n8n log | The workflow is not published | Run `pnpm n8n:import` (see [`../apps/n8n/README.md`](../apps/n8n/README.md#troubleshooting)) |
 | Webhook returns 403 | `x-hotel-secret` does not match the stored `Hotel Webhook Secret` | `N8N_WEBHOOK_SECRET` must match between the API and the import. Fix `.env` and re-run the import |
 | Import warns `OPENAI_API_KEY is EMPTY` | `.env` has no key | Fill it and re-run the import. The credential is imported empty until then |
 | Import stops with `… is empty in .env` | A required variable is missing | Fill it in `.env` and re-run (CRLF line endings are tolerated) |
@@ -368,8 +364,8 @@ diff before committing:
 | Upload returns `422 INVALID_PDF` | Not a PDF, or unreadable | Check the file |
 | Upload returns `413 FILE_TOO_LARGE` | Over 25 MB (`MAX_UPLOAD_MB`). nginx accepts up to 50 MB, so the API check is what rejects it | Compress or split the PDF |
 | Upload returns `502 INGEST_FAILED` | WF1 failed: download, parsing or embeddings | Open the failing execution in the n8n Executions list. The previous document stays active |
-| Lead shows `emailStatus: failed` | Resend key wrong, sender domain not verified, or `EMAIL_FROM` / `LEAD_TO` empty (the `Compose email` node throws) | Check the three variables, re-run the import, then `lead-test.sh` |
-| `lead-test.sh` refuses to run | `LEAD_TO` is empty or contains a reviewer address | Set `LEAD_TO` to your own inbox, re-run the import, then retry |
+| Lead shows `emailStatus: failed` | Resend key wrong, sender domain not verified, or `EMAIL_FROM` / `LEAD_TO` empty (the `Compose email` node throws) | Check the three variables, re-run the import, then `lead.spec.ts` |
+| The lead tests are skipped | `LEAD_TO` is empty or contains a reviewer address | Set `LEAD_TO` to your own inbox, re-run the import, then retry |
 
 ### Dashboard
 
@@ -378,5 +374,5 @@ diff before committing:
 | Badge stays on **Connecting** or goes to **Polling** | The SSE stream is buffered or dropped, or the API is down | Check `curl -N --max-time 4 http://localhost:8080/api/admin/stats/stream` shows `event: stats`. Behind the tunnel, check the Cloudflare hostname points at `web:80`. The page falls back to polling by design |
 | A failed question does not appear until the next change | The 502 path does not emit a stats event | Known gap, see [`ADMIN-DASHBOARD.md`](ADMIN-DASHBOARD.md#data-flow-message-to-chart) |
 
-If something is not listed, the first place to look is `docker compose --env-file .env -f infra/docker-compose.yml logs --tail=100 <service>`,
+If something is not listed, the first place to look is `docker compose logs --tail=100 <service>`,
 followed by the n8n Executions list at `https://<N8N_HOST>` or `http://localhost:5678`.

@@ -1,3 +1,5 @@
+# Run from the repo root: `docker compose up -d --build` (dev, merges compose.override.yml).
+# Deploy: `docker compose -f compose.yml --profile tunnel up -d --build`. Compose reads ./.env automatically.
 name: cincinnati-hotel
 services:
   postgres:
@@ -9,7 +11,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}            # hotel
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./db:/docker-entrypoint-initdb.d:ro
+      - ./infra/db:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
@@ -44,7 +46,7 @@ services:
       N8N_PERSONALIZATION_ENABLED: "false"
     volumes:
       - n8n_data:/home/node/.n8n
-      - ../n8n:/import:ro
+      - ./apps/n8n:/import:ro
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:5678/healthz || exit 1"]
       interval: 10s
@@ -52,7 +54,7 @@ services:
       retries: 30
 
   api:
-    build: { context: .., dockerfile: apps/api/Dockerfile }
+    build: { context: ., dockerfile: apps/api/Dockerfile }
     restart: unless-stopped
     depends_on:
       postgres: { condition: service_healthy }
@@ -76,7 +78,7 @@ services:
       retries: 10
 
   web:
-    build: { context: .., dockerfile: apps/web/Dockerfile }
+    build: { context: ., dockerfile: apps/web/Dockerfile }
     restart: unless-stopped
     depends_on: [api]
 

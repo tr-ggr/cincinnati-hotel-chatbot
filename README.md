@@ -13,13 +13,148 @@ Built for the Tauga AI entrance task. The brief is in [`docs/Cincinnati-Hotel-Ch
 - **All AI in n8n.** Ingest, retrieval, answering, classification and the lead email are visible n8n workflows. The
   API never calls OpenAI or Resend, so prompts and models can be inspected in the editor.
 - **Real-time admin.** Changes are pushed over Server-Sent Events and fall back to polling if the stream is interrupted.
-- **One command to run.** Docker Compose starts Postgres with pgvector, n8n, the API and the web app. Production
-  adds a Cloudflare Tunnel, so the VPS needs no open ports.
+- **One command to run.** `docker compose up` at the repo root starts Postgres with pgvector, n8n, the API and the web
+  app. Production adds a Cloudflare Tunnel, so the VPS needs no open ports.
 
-## Screenshots
+## Stack
 
-Screenshots of the guest chat, the contact form and the admin dashboard will be added under `docs/screenshots/` at
-submission.
+React 19 with Vite and Tailwind v4 (web) · Fastify 5 with TypeScript (API) · n8n 2.45.5 (all AI orchestration) ·
+Postgres 16 with pgvector · OpenAI (`text-embedding-3-small`, `gpt-4.1-mini`) · Resend (email) · Docker Compose ·
+nginx · Cloudflare Tunnel · Turborepo + pnpm workspaces · Vitest · Playwright.
+
+## Repository layout
+
+```
+compose.yml             all services (postgres, n8n, api, web, cloudflared); build context is the repo root
+compose.override.yml    dev only: publishes host ports, plain-HTTP n8n. Auto-merged by `docker compose`
+turbo.json              task pipeline for build / typecheck / lint / test / dev / e2e
+apps/api                Fastify API (Vitest tests in apps/api/test)
+apps/web                React app served by nginx (Vitest tests next to src/lib)
+apps/n8n                n8n workflows, prompts, credential template, import script, workflow contract tests
+apps/e2e                Playwright end-to-end tests (HTTP smoke, browser flows, real-mode accuracy + lead email)
+infra/db                Postgres init (n8n database, schema with pgvector)
+infra/cloudflared       tunnel setup notes
+infra/scripts/deploy.sh VPS deploy
+docs/                   architecture, PDF pipeline, dashboard, runbook, submission notes, sample PDF
+```
+
+## Setup
+
+### 1. Prerequisites
+
+| Need | For |
+|---|---|
+| Docker with Compose v2 (`docker compose version`) | Running the stack |
+| Node.js 22+ and pnpm 11 (`corepack enable`) | Tests, `pnpm dev`, the n8n import shortcut |
+| Git Bash on Windows (or bash on Linux/macOS), `jq`, `envsubst` (gettext) | `pnpm n8n:import` and `deploy.sh` |
+| OpenAI and Resend API keys | Real mode only. Mock mode needs no keys |
+
+### 2. Configure
+
+```bash
+cp .env.example .env
+pnpm install
+```
+
+Fill `.env`:
+
+- Always: `POSTGRES_PASSWORD`, `N8N_ENCRYPTION_KEY`, `N8N_WEBHOOK_SECRET` (`openssl rand -hex 24` for the two keys).
+  Keep `N8N_VERSION` pinned.
+- Mock mode: `N8N_MOCK=1`. The API answers in-process, so no keys are needed.
+- Real mode: `N8N_MOCK=0`, `OPENAI_API_KEY`, `RESEND_API_KEY`, `EMAIL_FROM` (a domain verified in Resend) and `LEAD_TO`
+  set to **your own inbox** while testing.
+- If ports 3000 or 5432 are taken on your machine, set `API_HOST_PORT` / `POSTGRES_HOST_PORT`.
+
+### 3. Start the stack
+
+Run every command from the repo root. Compose reads `compose.yml`, merges `compose.override.yml` and loads `.env`
+automatically, so no `-f` or `--env-file` flags are needed.
+
+```bash
+docker compose up -d --build --wait
+```
+
+| URL | What |
+|---|---|
+| <http://localhost:8080> | Guest chat (landing page → **Regular User**) |
+| <http://localhost:8080/admin> | Admin dashboard and PDF upload |
+| <http://localhost:5678> | n8n editor |
+| <http://localhost:8080/api/health> | API health (`n8n: "mock"` in mock mode) |
+
+On Windows, if another program holds IPv4 port 8080, use <http://[::1]:8080>.
+
+### 4. Real mode only: connect n8n
+
+1. Open <http://localhost:5678> and create the n8n owner account (once).
+2. Import the credentials and workflows from `.env` and publish them: `pnpm n8n:import`.
+3. Upload `docs/sample/cincinnati-hotel.pdf` at <http://localhost:8080/admin> and wait for **Ready**
+   (regenerate the PDF with `pnpm sample:pdf` if needed).
+
+### 5. Run the tests
+
+```bash
+pnpm test                       # Vitest in api, web and n8n (no stack needed)
+pnpm --filter e2e browsers      # once per machine: installs Chromium for Playwright
+pnpm e2e                        # Playwright against the running stack (mock or real)
+pnpm e2e:real                   # + accuracy set and lead webhook (real mode; sends real email to LEAD_TO)
+```
+
+`pnpm e2e` uploads the sample PDF, walks the HTTP contract (chat, fallback, lead, stats, SSE) and runs the browser
+flows. Test another deployment with `E2E_BASE_URL=https://hotel.example.com pnpm e2e`. The tests are described in
+[`docs/RUNBOOK.md`](docs/RUNBOOK.md#tests).
+
+## Docker Compose cheat sheet
+
+| Task | Command |
+|---|---|
+| Build and start everything, wait until healthy | `docker compose up -d --build --wait` |
+| Status and health | `docker compose ps` |
+| Follow logs | `docker compose logs -f api n8n` |
+| Start only the backing services (for `pnpm dev`) | `docker compose up -d postgres n8n` |
+| Rebuild one service after a code change | `docker compose up -d --build api` (or `web`) |
+| Apply a changed `.env` value | `docker compose up -d api` (recreates the container if its config changed) |
+| One-off mock run without editing `.env` | `N8N_MOCK=1 docker compose up -d api` |
+| Restart a service | `docker compose restart n8n` |
+| Shell into the database | `docker compose exec postgres psql -U hotel -d hotel` |
+| List active n8n workflows | `docker compose exec n8n n8n list:workflow --active=true --onlyId` |
+| Export workflows after editing in the UI | `docker compose exec -T n8n n8n export:workflow --all --separate --output=/tmp/wf` then `docker compose cp n8n:/tmp/wf/. apps/n8n/workflows/` |
+| Stop (keep data) | `docker compose down` |
+| Stop and **delete all data** (database, n8n, uploads) | `docker compose down -v` |
+| Show the merged config | `docker compose config` |
+
+**Production (VPS).** Never let the dev override in: always pass `-f compose.yml`, or put `COMPOSE_FILE=compose.yml` in
+the VPS `.env` so plain `docker compose` uses the production file only.
+
+```bash
+bash infra/scripts/deploy.sh                                        # pull, build, start with the tunnel, wait healthy
+docker compose -f compose.yml --profile tunnel up -d --build        # the same, by hand
+bash apps/n8n/scripts/import.sh --prod                              # first deploy, after creating the n8n owner
+docker compose -f compose.yml logs -f api
+```
+
+The full deploy, the Cloudflare Tunnel setup and troubleshooting are in [`docs/RUNBOOK.md`](docs/RUNBOOK.md).
+
+## Development with hot reload
+
+```bash
+docker compose up -d postgres n8n
+pnpm dev                        # turbo: api on :3000 (tsx watch), web on :5173 (vite, proxies /api)
+```
+
+The API does not read `.env` itself. Export the variables it needs first; the exact lines are in
+[`docs/RUNBOOK.md`](docs/RUNBOOK.md#development-without-containers).
+
+## Workspace commands (Turborepo)
+
+| Command | What it runs |
+|---|---|
+| `pnpm build` | `tsc` for the API, `vite build` for the web app (cached) |
+| `pnpm typecheck` | `tsc --noEmit` in api, web and e2e |
+| `pnpm lint` | ESLint in the web app |
+| `pnpm test` | Vitest in api, web and n8n |
+| `pnpm --filter api test` | One package only (`web`, `n8n`, `e2e` work the same) |
+| `pnpm e2e` / `pnpm e2e:real` | Playwright in `apps/e2e` |
+| `pnpm n8n:import` | `apps/n8n/scripts/import.sh` (dev compose files) |
 
 ## Documentation
 
@@ -28,56 +163,7 @@ submission.
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Architecture diagram, technology choices, database schema, API contract, n8n workflow contracts, compose and environment. The source of truth |
 | [`docs/PDF-PROCESSING.md`](docs/PDF-PROCESSING.md) | How a PDF is ingested (download, split, embed, store, purge), how a question is answered from it, and how "I don't know" is decided |
 | [`docs/ADMIN-DASHBOARD.md`](docs/ADMIN-DASHBOARD.md) | Dashboard design, what each statistic counts, and the real-time data flow with its polling fallback |
-| [`docs/RUNBOOK.md`](docs/RUNBOOK.md) | Prerequisites, local runs (mock and real), environment table, n8n first run and import, smoke and end-to-end tests, VPS deploy, extending the app, troubleshooting |
-| [`n8n/README.md`](n8n/README.md) | Node-by-node reference for the three workflows, credentials, import and export |
+| [`docs/RUNBOOK.md`](docs/RUNBOOK.md) | Prerequisites, environment table, local runs, n8n import, tests, VPS deploy, extending the app, troubleshooting |
+| [`apps/n8n/README.md`](apps/n8n/README.md) | Node-by-node reference for the three workflows, credentials, import and export |
 | [`sprints/README.md`](sprints/README.md) | How the build was planned: sprint cards and the status log |
 | [`.claude/CLAUDE.md`](.claude/CLAUDE.md) | Conventions for AI agents working in this repository |
-
-## Stack
-
-React 19 with Vite and Tailwind v4 (web) · Fastify 5 with TypeScript (API) · n8n 2.45.5 (all AI orchestration) ·
-Postgres 16 with pgvector · OpenAI (`text-embedding-3-small`, `gpt-4.1-mini`) · Resend (email) · Docker Compose ·
-nginx · Cloudflare Tunnel.
-
-Repository layout: `apps/api` (API), `apps/web` (web app), `n8n/` (workflows, prompts, credential template),
-`infra/` (compose files, database init, scripts), `docs/` (documentation and the sample PDF), `sprints/` (build plan).
-
-## Quickstart
-
-Requirements: Docker with Compose v2, and Git Bash on Windows (or bash on Linux and macOS) with `jq` and `envsubst`.
-The full list is in the [RUNBOOK](docs/RUNBOOK.md#prerequisites).
-
-### 1. Mock mode (no API keys needed)
-
-Mock mode replaces the n8n and OpenAI calls with an in-process mock, so the whole stack can be checked without keys.
-
-```bash
-cp .env.example .env
-# edit .env: set N8N_MOCK=1, POSTGRES_PASSWORD, N8N_ENCRYPTION_KEY and N8N_WEBHOOK_SECRET
-#   (openssl rand -hex 24 works for the two keys)
-
-docker compose --env-file .env -f infra/docker-compose.yml -f infra/compose.override.yml up -d --build
-bash infra/scripts/smoke.sh --base http://localhost:8080 --mock
-```
-
-Open <http://localhost:8080>. On Windows, if port 8080 is held by another program, use <http://[::1]:8080>.
-
-### 2. Real mode (OpenAI and Resend)
-
-1. In `.env`, set `N8N_MOCK=0`, `OPENAI_API_KEY`, `RESEND_API_KEY`, `EMAIL_FROM`, and `LEAD_TO` set to your own inbox.
-2. Start the stack with the same command as above.
-3. Open the n8n editor at <http://localhost:5678> and create the owner account (once).
-4. Import the credentials and workflows: `bash infra/scripts/n8n-import.sh`.
-5. Upload `docs/sample/cincinnati-hotel.pdf` at <http://localhost:8080/admin> and wait for **Ready**.
-6. Check the answers and the full stack:
-
-   ```bash
-   bash infra/scripts/chat-eval.sh                       # at least 9 of 10 answered flags must match
-   bash infra/scripts/smoke.sh --base http://localhost:8080
-   ```
-
-The smoke test's lead step sends a real email to `LEAD_TO`. Run `bash infra/scripts/lead-test.sh` to test the lead flow
-on its own; it refuses an empty `LEAD_TO`.
-
-For development with hot reload, the non-container setup, the environment table, deployment to a VPS behind a
-Cloudflare Tunnel, and troubleshooting, see the [RUNBOOK](docs/RUNBOOK.md).

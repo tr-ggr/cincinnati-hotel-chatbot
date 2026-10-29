@@ -2,7 +2,7 @@
 
 How the hotel's PDF becomes searchable vectors, how a guest question is answered from them, and how the
 "I don't know" path is decided. Contracts and exact node settings live in [`ARCHITECTURE.md`](ARCHITECTURE.md) §4 and §5;
-the node-by-node reference is [`../n8n/README.md`](../n8n/README.md).
+the node-by-node reference is [`../apps/n8n/README.md`](../apps/n8n/README.md).
 
 ## 1. Ingestion: upload to purge
 
@@ -55,7 +55,7 @@ would leave the bot with nothing to answer from after any failed upload.
   `metadata->>'document_id'`, and the `chunks_document_id` index serves that filter.
 - **Embeddings:** `text-embedding-3-small` produces 1536-dimensional vectors, matching `vector(1536)` in
   [`infra/db/01-schema.sql`](../infra/db/01-schema.sql). The same model embeds questions at query time, so the
-  two sides are comparable. Changing the model needs a full re-ingest (see [`../n8n/README.md`](../n8n/README.md#changing-the-openai-model)).
+  two sides are comparable. Changing the model needs a full re-ingest (see [`../apps/n8n/README.md`](../apps/n8n/README.md#changing-the-openai-model)).
 - **Sample document:** `pnpm sample:pdf` generates `docs/sample/cincinnati-hotel.pdf`, a 7-page fictional hotel
   brochure of about 18.8k characters. The smoke test and the accuracy set are written against it.
 
@@ -103,13 +103,13 @@ API: store category and answered on the user message, insert the assistant messa
   closest match.
 - **Score.** The PGVector `score` is pgvector's cosine **distance**: `0` is identical, `1` is orthogonal, and lower
   is better. `best_score` is the minimum of the six. The reasoning and the workflow source references are in
-  [`../n8n/README.md`](../n8n/README.md#retrieval-score-semantics).
+  [`../apps/n8n/README.md`](../apps/n8n/README.md#retrieval-score-semantics).
 - **Sources.** Returned as `{ chunk_index, score }`, where `chunk_index` is the retrieval rank (0 is closest). The
   API stores them with every assistant reply, including fallbacks, so each answer's evidence can be inspected later.
 
 ### Grounding prompt
 
-The prompt lives in [`../n8n/prompts/chat-system.md`](../n8n/prompts/chat-system.md) and is embedded in the
+The prompt lives in [`../apps/n8n/prompts/chat-system.md`](../apps/n8n/prompts/chat-system.md) and is embedded in the
 *Basic LLM Chain* node. The rules, in short:
 
 1. Use only facts in the excerpts. No outside knowledge, no guessing, no invented prices, times, names or policies.
@@ -138,11 +138,11 @@ The guarantee is layered, so no single layer has to be perfect:
    `answered: false` or when there are no chunks, and it refuses an answer that is `answered: true` but carries the
    canned text. The deterministic code, not the model, decides the final fallback.
 5. **Optional score guard.** It can reject answers whose best retrieval distance is above a threshold. It is off by
-   default (`SCORE_GUARD = 0`) because the threshold has not been calibrated yet (see the TODO in `n8n/README.md`).
+   default (`SCORE_GUARD = 0`) because the threshold has not been calibrated yet (see the TODO in `apps/n8n/README.md`).
 
 Known limit: the grounding is only as good as the model's compliance with rule 1. The accuracy set in
 [`sample/questions.json`](sample/questions.json) (six answerable and four unanswerable questions) is the check for
-that. The acceptance bar is at least 9 of 10 `answered` flags correct, run with `bash infra/scripts/chat-eval.sh`.
+that. The acceptance bar is at least 9 of 10 `answered` flags correct, run with `pnpm e2e:real`.
 
 ## 4. How "I don't know" is decided
 
@@ -171,15 +171,16 @@ canned sentence, and the admin dashboard counts the question as unanswered.
 Every user message is classified into one of eight categories by the same LLM call that writes the answer. The list
 is fixed in four places that must stay identical: `apps/api/src/lib/categories.ts`, `apps/web/src/lib/categories.ts`,
 the `CHECK` constraint in `infra/db/01-schema.sql`, and the Structured Output Parser schema in
-`n8n/workflows/02-chat-answer.json`. The RUNBOOK lists the steps for adding a category.
+`apps/n8n/workflows/02-chat-answer.json`. The RUNBOOK lists the steps for adding a category.
 
 ## 6. Verifying the pipeline
 
 | Check | Command | Expected |
 |---|---|---|
-| Mock path (no keys) | `bash infra/scripts/smoke.sh --base http://localhost:8080 --mock` | `SMOKE PASS (mode=mock …)`; upload reports 42 chunks |
+| Contracts (no stack) | `pnpm test` | Vitest green: category list identical in API, web, SQL and WF2; WF2 prompt matches `chat-system.md` |
+| Mock path (no keys) | `pnpm e2e` (with `N8N_MOCK=1`) | Playwright green; upload reports 42 chunks |
 | Real ingest | upload `docs/sample/cincinnati-hotel.pdf` in `/admin` | status `ready`, chunk count above 10 |
-| Real answers | `bash infra/scripts/chat-eval.sh` | at least 9 of 10 `answered` flags match; `hi there!` answers with `Other`; a random `document_id` gets the canned sentence |
-| End to end | `bash infra/scripts/smoke.sh --base http://localhost:8080` | `SMOKE PASS` |
+| Real answers | `pnpm e2e:real` (`tests/real/chat-eval.spec.ts`) | at least 9 of 10 `answered` flags match; `hi there!` answers with `Other`; a random `document_id` gets the canned sentence |
+| End to end | `pnpm e2e:real` | Playwright green (`api`, `ui`, `real` projects; the mock-only guest journey is skipped) |
 
-Operational checks for n8n are in [`../n8n/README.md`](../n8n/README.md#troubleshooting).
+Operational checks for n8n are in [`../apps/n8n/README.md`](../apps/n8n/README.md#troubleshooting).

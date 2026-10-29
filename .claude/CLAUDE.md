@@ -14,28 +14,31 @@ workflows, compose topology and prompts. Sprint cards reference its sections (§
 
 ## Commands
 - Install: `pnpm install` (pnpm 11; Node ≥ 22 locally, node:22-alpine in containers)
-- Dev stack: `docker compose --env-file .env -f infra/docker-compose.yml up -d postgres n8n` then `pnpm dev` (api :3000, web :5173)
-- Full stack: `docker compose --env-file .env -f infra/docker-compose.yml up -d --build` → web http://localhost:8080, n8n http://localhost:5678
-  (`infra/compose.override.yml` is auto-merged locally and exposes ports; deploy uses `-f docker-compose.yml` only)
-- Typecheck / build: `pnpm typecheck`, `pnpm build`
-- Smoke test: `bash infra/scripts/smoke.sh --base http://localhost:8080 [--mock] [--only upload,chat,lead,stats,sse]`
-- n8n import: `bash infra/scripts/n8n-import.sh` (requires the n8n owner account to have been created in the UI once)
+- Dev stack: `docker compose up -d postgres n8n` then `pnpm dev` (api :3000, web :5173)
+- Full stack: `docker compose up -d --build --wait` → web http://localhost:8080, n8n http://localhost:5678
+  (run at the repo root; `compose.override.yml` is auto-merged locally and exposes ports; deploy uses `-f compose.yml` only)
+- Turborepo runs every task: `pnpm typecheck`, `pnpm build`, `pnpm lint`, `pnpm test` (Vitest: api, web, n8n)
+- E2E (Playwright, `apps/e2e`, stack must be running): `pnpm e2e` (api + ui projects), `pnpm e2e:real` (+ accuracy set and
+  lead webhook; sends real email to `LEAD_TO`). First time: `pnpm --filter e2e browsers`. Override target with `E2E_BASE_URL`.
+- n8n import: `pnpm n8n:import` (requires the n8n owner account to have been created in the UI once)
 - Sample PDF: `pnpm sample:pdf` → `docs/sample/cincinnati-hotel.pdf`
 
 ## Conventions
 - TypeScript strict, ESM, no default exports except React pages. No ORM: all SQL lives in `apps/api/src/db/queries.ts`.
 - API contract is `docs/ARCHITECTURE.md` §4. `apps/web/src/lib/api.ts` must mirror it exactly — change both together.
 - Categories: the 8-value list in `apps/api/src/lib/categories.ts` and `apps/web/src/lib/categories.ts` must stay identical
-  to the CHECK constraint in `infra/db/01-schema.sql` and the Structured Output Parser schema in `n8n/workflows/02-*.json`.
+  to the CHECK constraint in `infra/db/01-schema.sql` and the Structured Output Parser schema in `apps/n8n/workflows/02-*.json`.
   Values: `Rooms`, `Restaurant & Dining`, `Amenities & Facilities`, `Pricing & Booking`, `Location & Transport`, `Policies`, `Events`, `Other`.
-- Canned fallback sentence (exact, used by n8n Guard node, API mock and smoke test):
+- Canned fallback sentence (exact, used by n8n Guard node, API mock and the tests):
   `I'm sorry, I don't have that information right now.`
 - Errors: `{ error: { code, message } }`. Codes are UPPER_SNAKE (`NO_DOCUMENT`, `ASSISTANT_UNAVAILABLE`, `INVALID_PDF`, `EMPTY_PDF`, `INGEST_FAILED`).
-- Secrets only in `.env` (never committed). `n8n/credentials.template.json` uses `${VAR}` placeholders filled by envsubst at import time.
-- n8n workflow JSON in `n8n/workflows/` is the source of truth. After editing in the UI, re-export:
-  `docker compose --env-file .env -f infra/docker-compose.yml exec n8n n8n export:workflow --all --separate --output=/import/workflows`
+- Secrets only in `.env` (never committed). `apps/n8n/credentials.template.json` uses `${VAR}` placeholders filled by envsubst at import time.
+- n8n workflow JSON in `apps/n8n/workflows/` is the source of truth. After editing in the UI, re-export:
+  `docker compose exec n8n n8n export:workflow --all --separate --output=/import/workflows`
 - Never float `n8nio/n8n:latest`; `N8N_VERSION` is pinned in `.env(.example)`.
 - Keep the UI dependency-light: Tailwind v4, lucide-react, recharts, react-markdown, clsx. No shadcn, no state libraries.
+- Tests: API tests live in `apps/api/test/` (outside `src/`, so `tsc` builds ignore them) and use `buildApp` from `src/app.ts`;
+  web tests sit next to the code as `*.test.ts`. The category / prompt parity tests enforce the two rules above.
 - Ports: web 8080 (nginx) / 5173 (vite), api 3000, n8n 5678, postgres 5432 (api/postgres host ports overridable via API_HOST_PORT / POSTGRES_HOST_PORT).
 - Commits: conventional one-liners per sprint gate (`S1: api core`). **Never add Claude as a co-author** on commits.
 

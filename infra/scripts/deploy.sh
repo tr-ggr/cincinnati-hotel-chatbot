@@ -8,12 +8,12 @@
 #   bash infra/scripts/deploy.sh --timeout 600    # health wait in seconds (default 300)
 #   ENV_FILE=/path/to/prod.env bash infra/scripts/deploy.sh
 #
-# Uses ONLY infra/docker-compose.yml (never infra/compose.override.yml, which is dev-only).
+# Uses ONLY compose.yml (never compose.override.yml, which is dev-only).
 # Steps:
 #   1. preflight: .env present, required vars non-empty (values never printed), N8N_VERSION pinned (not latest),
 #      docker compose v2+ and a reachable daemon
 #   2. git pull --ff-only (only inside a git work tree with an upstream branch)
-#   3. docker compose --env-file .env -f infra/docker-compose.yml [--profile tunnel] up -d --build
+#   3. docker compose --env-file .env -f compose.yml [--profile tunnel] up -d --build
 #   4. wait until postgres, n8n, api are healthy and web (+ cloudflared) are running
 #   5. print public URLs and next steps
 set -euo pipefail
@@ -44,7 +44,7 @@ while [ $# -gt 0 ]; do
 done
 [[ "$TIMEOUT" =~ ^[0-9]+$ ]] && [ "$TIMEOUT" -gt 0 ] || die "--timeout must be a positive integer (got '$TIMEOUT')"
 
-COMPOSE_FILE_PROD="infra/docker-compose.yml"
+COMPOSE_FILE_PROD="compose.yml"
 ENV_FILE="${ENV_FILE:-.env}"
 
 # --- 1. preflight: env file -------------------------------------------------------------------------------
@@ -70,7 +70,7 @@ shopt -s nocasematch
 shopt -u nocasematch
 
 for v in OPENAI_API_KEY RESEND_API_KEY EMAIL_FROM LEAD_TO; do
-  [ -n "${!v:-}" ] || warn "$v is empty — n8n credentials/workflows imported from it will not work until it is set (then re-run n8n-import.sh --prod)"
+  [ -n "${!v:-}" ] || warn "$v is empty — n8n credentials/workflows imported from it will not work until it is set (then re-run apps/n8n/scripts/import.sh --prod)"
 done
 [ "${N8N_MOCK:-0}" = 0 ] || warn "N8N_MOCK='${N8N_MOCK}' — the API will return MOCK answers instead of calling n8n (set N8N_MOCK=0 for production)"
 for v in N8N_HOST PUBLIC_WEB_HOST; do
@@ -195,16 +195,16 @@ cat <<EOF
 
 Next steps
   1. First deploy only: open https://${N8N_HOST}, create the n8n owner account, then
-       bash infra/scripts/n8n-import.sh --prod
-     (re-run it whenever n8n/workflows/*.json or the API keys / EMAIL_FROM / LEAD_TO in ${ENV_FILE} change)
+       bash apps/n8n/scripts/import.sh --prod
+     (re-run it whenever apps/n8n/workflows/*.json or the API keys / EMAIL_FROM / LEAD_TO in ${ENV_FILE} change)
   2. Upload the hotel PDF at https://${PUBLIC_WEB_HOST}/admin
-  3. Smoke test:
-       bash infra/scripts/smoke.sh --base https://${PUBLIC_WEB_HOST}
-  Note: keep LEAD_TO set to your own inbox until the final reviewer test — every lead / smoke run sends real email.
+  3. End-to-end test (from a machine with pnpm + browsers; sends one real lead email):
+       E2E_BASE_URL=https://${PUBLIC_WEB_HOST} E2E_MODE=real pnpm e2e:real
+  Note: keep LEAD_TO set to your own inbox until the final reviewer test — every lead / e2e run sends real email.
 EOF
 if [ "$TUNNEL" = 0 ]; then
   cat <<EOF
   --no-tunnel: the public URLs above only work once your own tunnel (e.g. ngrok) points at web:80 and n8n:5678.
-  infra/docker-compose.yml publishes no host ports, so a host-side ngrok needs a compose file that maps them.
+  compose.yml publishes no host ports, so a host-side ngrok needs a compose file that maps them.
 EOF
 fi

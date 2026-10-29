@@ -1,4 +1,4 @@
-# Build context is the repo root (see infra/docker-compose.yml: context: .., dockerfile: apps/api/Dockerfile).
+# Build context is the repo root (see compose.yml: context: ., dockerfile: apps/api/Dockerfile).
 # Only the files this image needs are copied explicitly, so host node_modules never leak in.
 FROM node:22-alpine AS base
 RUN corepack enable && corepack prepare pnpm@11.22.0 --activate

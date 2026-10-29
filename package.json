@@ -7,17 +7,21 @@
     "node": ">=22"
   },
   "scripts": {
-    "dev": "pnpm -r --parallel dev",
-    "build": "pnpm -r build",
-    "typecheck": "pnpm -r typecheck",
-    "lint": "pnpm -r lint",
-    "smoke": "bash infra/scripts/smoke.sh",
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "typecheck": "turbo run typecheck",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "e2e": "turbo run e2e --filter=e2e",
+    "e2e:real": "turbo run e2e:real --filter=e2e",
+    "n8n:import": "pnpm --filter n8n import",
     "sample:pdf": "tsx docs/sample/generate-sample-pdf.ts"
   },
   "devDependencies": {
     "@types/pdfkit": "^0.17.7",
     "pdfkit": "^0.20.2",
     "tsx": "^4.23.15",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "turbo": "^2.11.10"
   }
 }

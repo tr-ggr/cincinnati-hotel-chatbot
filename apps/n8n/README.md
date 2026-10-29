@@ -2,8 +2,8 @@
 
 All AI logic of the chatbot lives in three n8n workflows. The API (`apps/api`) never calls OpenAI or Resend
 directly; it calls these workflows over the internal Docker network. Architecture background:
-[`../docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md) (§1 decisions, §5 workflow contracts, §7 compose and env).
-PDF ingestion in depth: [`../docs/PDF-PROCESSING.md`](../docs/PDF-PROCESSING.md) (written in S4).
+[`docs/ARCHITECTURE.md`](../../docs/ARCHITECTURE.md) (§1 decisions, §5 workflow contracts, §7 compose and env).
+PDF ingestion in depth: [`docs/PDF-PROCESSING.md`](../../docs/PDF-PROCESSING.md) (written in S4).
 
 Pinned runtime: **n8n `2.45.5`** (`N8N_VERSION` in `.env`, never `latest`).
 
@@ -64,21 +64,21 @@ Webhook → Extract (Set) → Postgres PGVector Store [Get Many, top 6, filter d
 | `Embeddings OpenAI` | `@n8n/n8n-nodes-langchain.embeddingsOpenAi` (1.2) | `text-embedding-3-small` | Embeds the question with the same model used at ingest |
 | `Build context` | `n8n-nodes-base.code` (2) | Run Once for All Items. Builds `context` (`[1] …` excerpts), `best_score`, `n_chunks`, formatted `history` | One item in, one item out, regardless of how many chunks came back |
 | `Has context?` | `n8n-nodes-base.if` (2.2) | `n_chunks > 0` (strict number comparison) | Skips the LLM entirely when there is nothing to ground on |
-| `Basic LLM Chain` | `@n8n/n8n-nodes-langchain.chainLlm` (1.9) | prompt = `n8n/prompts/chat-system.md`, output parser on, **On Error: Continue** | Grounded answer, category and `answered` flag in one call |
+| `Basic LLM Chain` | `@n8n/n8n-nodes-langchain.chainLlm` (1.9) | prompt = `apps/n8n/prompts/chat-system.md`, output parser on, **On Error: Continue** | Grounded answer, category and `answered` flag in one call |
 | `OpenAI Chat Model` | `@n8n/n8n-nodes-langchain.lmChatOpenAi` (1.3) | `gpt-4.1-mini`, `temperature 0`, `maxTokens 600`, `timeout 20000`, `maxRetries 1`, **`responsesApiEnabled: false`** | Chat Completions API (the v1.3 default would be Responses API). Deterministic output |
 | `Structured Output Parser` | `@n8n/n8n-nodes-langchain.outputParserStructured` (1.3) | manual JSON schema `{ answer: string, category: enum of 8, answered: boolean }`, **`autoFix: true`** | Enforces the shape; auto-fix asks the same model once to repair a malformed reply |
 | `Guard & finalize` | `n8n-nodes-base.code` (2) | Enforces the invariants below. `SCORE_GUARD = 0` (off) | Deterministic last line of defence; the LLM never has the final word on fallbacks |
 | `Respond to Webhook` | `n8n-nodes-base.respondToWebhook` (1.5) | JSON `{ answer, category, answered, sources, model }` | Shape mirrors the API contract §4 |
 
 
-- **Prompt sync.** `n8n/prompts/chat-system.md` is the source of truth for the wording. n8n cannot read
+- **Prompt sync.** `apps/n8n/prompts/chat-system.md` is the source of truth for the wording. n8n cannot read
   the file at runtime, so its text is embedded in the *Basic LLM Chain* node's prompt, with
   `{{ context }}` / `{{ history }}` / `{{ question }}` replaced by
   `{{ $('Build context').first().json.<field> }}`. **Edit both together**: if you change the `.md`, paste the
   same text into the node (or edit the JSON) and re-export. Quick check that they still match:
   ```bash
-  diff <(jq -r '.nodes[]|select(.name=="Basic LLM Chain").parameters.text' n8n/workflows/02-chat-answer.json \
-         | sed -e '1s/^=//' -e "s/{{ \$('Build context').first().json.\([a-z]*\) }}/{{ \1 }}/") n8n/prompts/chat-system.md
+  diff <(jq -r '.nodes[]|select(.name=="Basic LLM Chain").parameters.text' apps/n8n/workflows/02-chat-answer.json \
+         | sed -e '1s/^=//' -e "s/{{ \$('Build context').first().json.\([a-z]*\) }}/{{ \1 }}/") apps/n8n/prompts/chat-system.md
   ```
   The Structured Output Parser appends its own format instructions after the prompt; with node v1.3 the model
   must return `{"output": {answer, category, answered}}`. *Auto-fix* is enabled (same chat model), so a reply
@@ -123,7 +123,7 @@ Webhook → Summarize (Basic LLM Chain, + OpenAI Chat Model gpt-4.1-mini, temp 0
 | Node | Type (typeVersion) | Key parameters | Why |
 |---|---|---|---|
 | `Webhook` | `n8n-nodes-base.webhook` (2.2) | `POST`, path `hotel/lead`, Header Auth (`Hotel Webhook Secret`) | Same authentication as the other workflows |
-| `Summarize` | `@n8n/n8n-nodes-langchain.chainLlm` (1.9) | system text = `n8n/prompts/lead-summary.md` (plain text: SUMMARY + UNANSWERED QUESTIONS), **On Error: Continue** | If the LLM fails the email still goes out with the raw transcript |
+| `Summarize` | `@n8n/n8n-nodes-langchain.chainLlm` (1.9) | system text = `apps/n8n/prompts/lead-summary.md` (plain text: SUMMARY + UNANSWERED QUESTIONS), **On Error: Continue** | If the LLM fails the email still goes out with the raw transcript |
 | `OpenAI Chat Model` | `@n8n/n8n-nodes-langchain.lmChatOpenAi` (1.3) | `gpt-4.1-mini`, temperature `0.2`, credential `OpenAI account`. Uses the **Responses API** (`/v1/responses`) by default in this workflow | Cheap summarisation; Responses API is the node default in v1.3 (WF2 turns it off explicitly, see the WF2 table) |
 | `Compose email` | `n8n-nodes-base.code` (2) | Builds `subject`, `html`, `text` and the Resend `payload`: lead details, summary, highlighted unanswered question, full transcript. `FROM` and `TO` are read from `${EMAIL_FROM}` / `${LEAD_TO}`. Throws if `LEAD_TO` or `EMAIL_FROM` is empty | Fails fast on bad config instead of sending to nobody. Address placeholders are substituted by `n8n-import.sh` only |
 | `Send via Resend` | `n8n-nodes-base.httpRequest` (4.5) | `POST https://api.resend.com/emails`, JSON body `{{ JSON.stringify($json.payload) }}`, Header Auth `Resend` (`Authorization: Bearer …`) | Resend's REST API; `reply_to` is the guest's address so reviewers can reply directly |
@@ -155,7 +155,7 @@ fallback. Category `Other` (greetings and small talk, which never retrieve close
 safety net against hallucinated answers on far-off retrievals. If you enable it, use a loose cutoff around
 **0.75**. See the calibration below.
 
-**Calibration (real `text-embedding-3-small`, sample PDF, 24 chunks, 2026-10-29, `chat-eval.sh`):**
+**Calibration (real `text-embedding-3-small`, sample PDF, 24 chunks, 2026-10-29, `chat-eval.spec.ts`):**
 
 | Group | `best_score` values (cosine distance) |
 |---|---|
@@ -195,7 +195,7 @@ value imported here.
 - The call stays on the Docker network. The Cloudflare Tunnel is never involved; only the n8n *editor* is exposed
   through it (`n8n.<domain>`).
 - The API aborts the chat call after 30 s and answers `502 ASSISTANT_UNAVAILABLE`.
-- `N8N_MOCK=1` replaces these calls with an in-process mock (no n8n, no OpenAI), used by the smoke test's `--mock` mode.
+- `N8N_MOCK=1` replaces these calls with an in-process mock (no n8n, no OpenAI), used by `pnpm e2e` (mock mode).
 - `/internal/*` routes on the API (including the PDF file that WF1 downloads) are not proxied by nginx and require the
   same header.
 
@@ -207,15 +207,15 @@ curl -X POST http://localhost:5678/webhook/hotel/chat \
   -d '{"question":"What time is check-in?","document_id":"<uuid>","history":[]}'
 ```
 
-## Import (`infra/scripts/n8n-import.sh`)
+## Import (`apps/n8n/scripts/import.sh`)
 
-Prerequisites: the stack is running (`docker compose -f infra/docker-compose.yml up -d postgres n8n`), the n8n
+Prerequisites: the stack is running (`docker compose up -d postgres n8n`), the n8n
 owner account has been created once in the UI (http://localhost:5678), and `.env` exists with the keys filled.
 
 ```bash
-bash infra/scripts/n8n-import.sh            # dev: infra/docker-compose.yml + infra/compose.override.yml
-bash infra/scripts/n8n-import.sh --prod     # VPS: infra/docker-compose.yml only
-COMPOSE_FILES="infra/docker-compose.yml" ENV_FILE=.env bash infra/scripts/n8n-import.sh   # explicit override
+pnpm n8n:import                            # dev: compose.yml + compose.override.yml
+bash apps/n8n/scripts/import.sh --prod     # VPS: compose.yml only (or: pnpm --filter n8n import:prod)
+COMPOSE_FILES="compose.yml" ENV_FILE=.env bash apps/n8n/scripts/import.sh   # explicit override
 ```
 
 - Runs from any working directory (it `cd`s to the repo root). Use Git Bash on Windows; it sets `MSYS_NO_PATHCONV=1`
@@ -235,13 +235,11 @@ COMPOSE_FILES="infra/docker-compose.yml" ENV_FILE=.env bash infra/scripts/n8n-im
 
 ## Export (after editing in the n8n UI)
 
-The files in `n8n/workflows/` are the source of truth. Edit in the UI, then re-export:
+The files in `apps/n8n/workflows/` are the source of truth. Edit in the UI, then re-export:
 
 ```bash
-docker compose --env-file .env -f infra/docker-compose.yml -f infra/compose.override.yml \
-  exec -T n8n n8n export:workflow --all --separate --output=/tmp/wf
-docker compose --env-file .env -f infra/docker-compose.yml -f infra/compose.override.yml \
-  cp n8n:/tmp/wf/. n8n/workflows/
+docker compose exec -T n8n n8n export:workflow --all --separate --output=/tmp/wf
+docker compose cp n8n:/tmp/wf/. apps/n8n/workflows/
 ```
 
 Then rename the exported files to the canonical names `01-ingest-pdf.json`, `02-chat-answer.json` and
@@ -253,13 +251,13 @@ Before you commit:
   placeholders `${EMAIL_FROM}` and `${LEAD_TO}` there, so no real address enters git. Use `git diff` to check.
 - Check that every file still has a top-level `"id"`, and that `"active"` is not used as a reason to change
   anything. Activation is handled by the import script.
-- If you change `n8n/prompts/*.md`, update the node text as well (see the prompt sync check in the WF2 section).
+- If you change `apps/n8n/prompts/*.md`, update the node text as well (see the prompt sync check in the WF2 section).
 
 ## Changing the OpenAI model
 
 - **Chat model (WF2 and WF3).** Change the `model` value of the `OpenAI Chat Model` nodes (`gpt-4.1-mini`) in
   `02-chat-answer.json` and `03-lead-email.json`, or change it in the UI and re-export. Re-run the chat eval
-  afterwards (`bash infra/scripts/chat-eval.sh`), because the category and `answered` behaviour depends on the model.
+  afterwards (`pnpm e2e:real`), because the category and `answered` behaviour depends on the model.
 - **Embedding model (WF1 and WF2).** Change `model` in `Embeddings OpenAI`. **Dimensions must stay 1536** to match
   `vector(1536)` in `infra/db/01-schema.sql`. Otherwise the schema has to change too. Any model change also needs a
   **full re-ingest** of the document, because existing vectors are not comparable to the new model's vectors.
@@ -275,9 +273,9 @@ The lead email is one HTTP request plus the payload builder:
    (Header Auth) for another provider's REST API. Keep the response's `id` so the `Respond to Webhook` node
    can return `email_id`.
 3. `credentials.template.json`: change the `Resend` entry (name, `header`, `value`) and the env var it reads.
-4. `.env.example` and `.env`: rename `RESEND_API_KEY`, then re-run `n8n-import.sh`.
+4. `.env.example` and `.env`: rename `RESEND_API_KEY`, then re-run `pnpm n8n:import`.
 
-Also update the API if the response id field changes, and rerun `bash infra/scripts/lead-test.sh` (it refuses an empty
+Also update the API if the response id field changes, and rerun `pnpm e2e:real` (the lead tests skip an empty
 `LEAD_TO` and the reviewer addresses, so point it at your own test inbox).
 
 ## Re-pinning `N8N_VERSION`
@@ -287,30 +285,36 @@ Also update the API if the response id field changes, and rerun `bash infra/scri
 1. Check the release notes for the target version, and that `publish:workflow` and `import:workflow --separate` still
    exist in it.
 2. Edit `N8N_VERSION` in `.env` and `.env.example`.
-3. Pull and recreate: `docker compose --env-file .env -f infra/docker-compose.yml -f infra/compose.override.yml up -d --build n8n`
+3. Pull and recreate: `docker compose up -d --build n8n`
    (or `pull n8n` first).
-4. Run `bash infra/scripts/n8n-import.sh` again and confirm the activation line for all three ids.
-5. Run `bash infra/scripts/chat-eval.sh` and `bash infra/scripts/lead-test.sh` (with your own inbox in `LEAD_TO`).
+4. Run `pnpm n8n:import` again and confirm the activation line for all three ids.
+5. Run `pnpm test` (workflow contract checks) and `pnpm e2e:real` (with your own inbox in `LEAD_TO`).
 
 ## Tests
 
-- `bash infra/scripts/chat-eval.sh [--prod]` posts `docs/sample/questions.json` straight to the WF2 webhook. It prints
-  question, expected, actual, category and `best_score`, then asserts at least 9 of 10 answered flags match, that
-  `hi there!` gives `answered=true` with `Other`, and that a random `document_id` gives the canned sentence.
-  Exit codes: `0` pass, `1` assertion failed, `2` precondition failed (no chunks, no key, webhook not live, missing tool).
-- `bash infra/scripts/lead-test.sh [--url <webhook url>]` posts a fake lead to WF3. It refuses to run when `LEAD_TO`
-  is empty or contains a reviewer address. Pass when the response has `ok: true` and a non-empty `email_id`.
+- `pnpm --filter n8n test` (Vitest, `test/workflows.test.ts`, no n8n needed): the three files parse and have fixed ids,
+  each webhook is `hotel/*` with header auth, no inline API keys, the Structured Output Parser enum and the Guard
+  constants match `apps/api/src/lib/categories.ts`, the WF2 prompt matches `prompts/chat-system.md` (the sync check
+  above, automated), `03-*` keeps the `${EMAIL_FROM}` / `${LEAD_TO}` placeholders, and every credential a node
+  references exists in `credentials.template.json`.
+- `pnpm e2e:real` runs `apps/e2e/tests/real/chat-eval.spec.ts`, which posts `docs/sample/questions.json` straight to the
+  WF2 webhook. It prints question, expected, actual, category and `best_score` as a table, then asserts at least 9 of
+  10 answered flags match, that `hi there!` gives `answered=true` with `Other`, and that a random `document_id` gives
+  the canned sentence. It is skipped when the API runs in mock mode.
+- The same run includes `apps/e2e/tests/real/lead.spec.ts`, which posts a fake lead to WF3. It is skipped when
+  `LEAD_TO` is empty or contains a reviewer address, and passes when the response has `ok: true` and a non-empty
+  `email_id`.
 
 ## Troubleshooting
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| Webhook returns **404** | The workflow is not active. In n8n 2.x a workflow needs `publish:workflow`, and n8n must be restarted to register the webhook | Run `bash infra/scripts/n8n-import.sh`. Check with `n8n list:workflow --active=true --onlyId` (inside the container) |
+| Webhook returns **404** | The workflow is not active. In n8n 2.x a workflow needs `publish:workflow`, and n8n must be restarted to register the webhook | Run `pnpm n8n:import`. Check with `n8n list:workflow --active=true --onlyId` (inside the container) |
 | Webhook returns **403** | `x-hotel-secret` does not match the *Hotel Webhook Secret* credential | Compare `N8N_WEBHOOK_SECRET` in `.env` (the API uses the same value) and re-run the import script. Do not paste the secret into the README or issues |
 | Chat returns **empty retrieval** (`n_chunks = 0`, canned sentence) | No chunks match the `document_id` (the active document was purged, not yet ingested, or ingest failed) | Check the document status in the admin page. Re-upload the PDF. Verify with `SELECT metadata->>'document_id', count(*) FROM chunks GROUP BY 1;` in Postgres |
 | Chat returns **502** `ASSISTANT_UNAVAILABLE` | WF2 failed with a non-format error: OpenAI key missing or wrong, quota, rate limit, network or timeout (n8n returns 500) | Check the `OpenAI account` key and the n8n execution log at `https://n8n.<domain>` (or `http://localhost:5678` in dev). Retry in the UI |
 | Upload returns **502** `INGEST_FAILED` | WF1 failed (download, PDF parsing, or embeddings) | Open the failing execution in the n8n Executions list to see which node failed |
-| Lead returns `emailStatus: failed` | WF3 failed, usually Resend key wrong, sender domain not verified in Resend, or `LEAD_TO` / `EMAIL_FROM` empty (`Compose email` throws) | Check `RESEND_API_KEY`, `EMAIL_FROM` and `LEAD_TO` in `.env`, re-run the import script, then `lead-test.sh` |
+| Lead returns `emailStatus: failed` | WF3 failed, usually Resend key wrong, sender domain not verified in Resend, or `LEAD_TO` / `EMAIL_FROM` empty (`Compose email` throws) | Check `RESEND_API_KEY`, `EMAIL_FROM` and `LEAD_TO` in `.env`, re-run the import script, then `lead.spec.ts` |
 | `Basic LLM Chain` says the output "doesn't fit required format" | Model reply is malformed even after auto-fix | Expected to resolve to the canned sentence (HTTP 200). If it happens often, check the prompt and the model |
 | Import warns `OPENAI_API_KEY is EMPTY` | `.env` has no key | Fill the key and re-run. The credential was imported empty |
 | Import fails with `… is empty in .env` | A required variable is missing | Fill the variable in `.env` (CRLF line endings are tolerated) |

@@ -2,17 +2,17 @@
 # Import n8n credentials + workflows from the repo into the running n8n container and publish (activate) them.
 #
 # Usage (from any directory; Git Bash on Windows or Linux):
-#   bash infra/scripts/n8n-import.sh            # dev: infra/docker-compose.yml + infra/compose.override.yml (if present)
-#   bash infra/scripts/n8n-import.sh --prod     # deploy: infra/docker-compose.yml only
-#   COMPOSE_FILES="infra/docker-compose.yml" ENV_FILE=.env bash infra/scripts/n8n-import.sh
+#   pnpm n8n:import                                  # dev: compose.yml + compose.override.yml (if present)
+#   bash apps/n8n/scripts/import.sh --prod           # deploy: compose.yml only
+#   COMPOSE_FILES="compose.yml" ENV_FILE=.env bash apps/n8n/scripts/import.sh
 #
 # Prerequisites: stack running (`n8n` service healthy) and the n8n owner account created once in the UI.
 #
 # What it does (idempotent — fixed ids, re-running overwrites in place):
-#   1. loads .env, fills n8n/credentials.template.json (${VAR} placeholders, values JSON-escaped) and streams it
+#   1. loads .env, fills apps/n8n/credentials.template.json (${VAR} placeholders, values JSON-escaped) and streams it
 #      straight into the container (/tmp/hotel-import) — the filled file is never written on the host
 #   2. n8n import:credentials
-#   3. copies n8n/workflows/*.json into the container (03-* gets ${EMAIL_FROM} / ${LEAD_TO} substituted first)
+#   3. copies apps/n8n/workflows/*.json into the container (03-* gets ${EMAIL_FROM} / ${LEAD_TO} substituted first)
 #      and runs n8n import:workflow --separate
 #   4. n8n publish:workflow --id=<id> for every imported workflow (n8n 2.x: update:workflow --active is deprecated)
 #   5. deletes the temp files in the container, restarts n8n and waits for /healthz, then verifies activation
@@ -21,7 +21,8 @@ set -euo pipefail
 # Git Bash: don't rewrite container paths like /tmp/... into C:/... when passed to docker.exe
 export MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+N8N_DIR=apps/n8n
 cd "$ROOT"
 
 log()  { printf '\033[1;34m[n8n-import]\033[0m %s\n' "$*"; }
@@ -45,9 +46,9 @@ ENV_FILE="${ENV_FILE:-.env}"
 [ -f "$ENV_FILE" ] || die "env file '$ENV_FILE' not found (copy .env.example to .env and fill it)"
 
 if [ -z "${COMPOSE_FILES:-}" ]; then
-  COMPOSE_FILES="infra/docker-compose.yml"
-  if [ "$PROD" = 0 ] && [ -f infra/compose.override.yml ]; then
-    COMPOSE_FILES="$COMPOSE_FILES infra/compose.override.yml"
+  COMPOSE_FILES="compose.yml"
+  if [ "$PROD" = 0 ] && [ -f compose.override.yml ]; then
+    COMPOSE_FILES="$COMPOSE_FILES compose.override.yml"
   fi
 fi
 DC=(docker compose --env-file "$ENV_FILE")
@@ -67,7 +68,7 @@ done
 [ -n "${RESEND_API_KEY:-}" ] || warn "RESEND_API_KEY is EMPTY — credential 'Resend' is imported with an empty key; lead emails will fail until you fill it and re-run this script"
 
 shopt -s nullglob
-WORKFLOWS=(n8n/workflows/*.json)
+WORKFLOWS=("$N8N_DIR"/workflows/*.json)
 shopt -u nullglob
 
 # --- container checks -----------------------------------------------------------------------------------
@@ -84,20 +85,20 @@ n8n_exec sh -c "rm -rf $CTMP && mkdir -p $CTMP/workflows && chmod 700 $CTMP"
 json_escape() { printf '%s' "$1" | jq -Rs . | sed -e 's/^"//' -e 's/"$//'; }
 
 # --- credentials ----------------------------------------------------------------------------------------
-log "importing credentials from n8n/credentials.template.json"
+log "importing credentials from $N8N_DIR/credentials.template.json"
 (
   for v in OPENAI_API_KEY RESEND_API_KEY POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB N8N_WEBHOOK_SECRET; do
     export "$v=$(json_escape "${!v:-}")"
   done
   envsubst '${OPENAI_API_KEY} ${RESEND_API_KEY} ${POSTGRES_USER} ${POSTGRES_PASSWORD} ${POSTGRES_DB} ${N8N_WEBHOOK_SECRET}' \
-    < n8n/credentials.template.json | jq -c .
+    < "$N8N_DIR/credentials.template.json" | jq -c .
 ) | n8n_exec sh -c "umask 077 && cat > $CTMP/credentials.json"
 n8n_exec n8n import:credentials --input="$CTMP/credentials.json"
 n8n_exec rm -f "$CTMP/credentials.json"
 
 # --- workflows ------------------------------------------------------------------------------------------
 if [ "${#WORKFLOWS[@]}" -eq 0 ]; then
-  warn "no workflow files in n8n/workflows/ — nothing to import"
+  warn "no workflow files in $N8N_DIR/workflows/ — nothing to import"
 else
   IDS=()
   for wf in "${WORKFLOWS[@]}"; do

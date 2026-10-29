@@ -1,10 +1,8 @@
 import { expect, test } from '@playwright/test';
+import { CANNED_FALLBACK as CANNED, CHECKIN_Q, HELIPAD_Q, isMockMode } from '../support';
 
-const CHECKIN_Q = 'What time is check-in?';
-const HELIPAD_Q = 'Is there a helipad on the roof?';
-const CANNED = "I'm sorry, I don't have that information right now.";
-
-test('guest asks a question, gets the fallback, and leaves contact details', async ({ page }) => {
+test('guest asks a question, gets the fallback, and leaves contact details', async ({ page, request }) => {
+  test.skip(!(await isMockMode(request)), 'asserts the [mock] answer text');
   await page.goto('/');
   await page.getByRole('link', { name: 'Regular User' }).click();
   await expect(page).toHaveURL(/\/chat$/);

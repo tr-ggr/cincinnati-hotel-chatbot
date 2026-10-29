@@ -1,4 +1,4 @@
-# Build context is the repository root (see infra/docker-compose.yml).
+# Build context is the repository root (see compose.yml).
 
 # ---- build ----
 FROM node:22-alpine AS build

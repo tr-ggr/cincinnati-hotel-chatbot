@@ -79,13 +79,17 @@ Canned fallback sentence (exact): `I'm sorry, I don't have that information righ
 ```
 TaugaAI/
 ├── .claude/CLAUDE.md
-├── .env.example  .gitignore  .editorconfig  package.json  pnpm-workspace.yaml  README.md
+├── .env.example  .gitignore  .editorconfig  package.json  pnpm-workspace.yaml  turbo.json  README.md
+├── compose.yml                       # all services; build context = repo root
+├── compose.override.yml              # dev only: host ports + plain-HTTP n8n (auto-merged by `docker compose`)
 ├── apps/
 │   ├── api/                          # Node 22 + Fastify 5 + TypeScript (ESM)
 │   │   ├── Dockerfile                # node:22-alpine multi-stage (install → tsc → runtime)
-│   │   ├── package.json  tsconfig.json
+│   │   ├── package.json  tsconfig.json  vitest.config.ts
+│   │   ├── test/                     # Vitest: config, n8n client, routes via app.inject(), category parity
 │   │   └── src/
-│   │       ├── index.ts              # bootstrap, plugins (cors, multipart, rate-limit), route registration, graceful shutdown
+│   │       ├── index.ts              # entrypoint: load config, listen, graceful shutdown
+│   │       ├── app.ts                # buildApp(): plugins (cors, multipart, rate-limit), error envelope, routes
 │   │       ├── config.ts             # zod-validated env
 │   │       ├── db/pool.ts            # pg Pool
 │   │       ├── db/queries.ts         # ALL SQL as typed functions (no ORM)
@@ -100,30 +104,32 @@ TaugaAI/
 │   │           ├── leads.ts          # POST /api/leads
 │   │           ├── admin.ts          # GET/POST /api/admin/document, GET /api/admin/stats, GET /api/admin/stats/stream
 │   │           └── internal.ts       # GET /internal/documents/:id/file (n8n only, x-hotel-secret)
-│   └── web/                          # React 19 + Vite + TypeScript + Tailwind v4
+│   ├── web/                          # React 19 + Vite + TypeScript + Tailwind v4
 │       ├── Dockerfile                # multi-stage → nginx:alpine
 │       ├── nginx.conf                # SPA fallback + /api proxy (buffering off)
-│       ├── index.html  package.json  vite.config.ts  tsconfig.json
+│       ├── index.html  package.json  vite.config.ts  vitest.config.ts  tsconfig.json
 │       └── src/
 │           ├── main.tsx  App.tsx     # react-router: "/", "/chat", "/admin", "*"
 │           ├── index.css             # tailwind import + design tokens
-│           ├── lib/api.ts            # typed fetch client mirroring §4
+│           ├── lib/api.ts            # typed fetch client mirroring §4 (+ api.test.ts, format.test.ts)
 │           ├── lib/categories.ts
 │           ├── lib/useStatsStream.ts # SSE hook with polling fallback
 │           ├── components/ui/        # Button, Card, Input, Badge, Spinner, Skeleton
 │           ├── components/chat/      # MessageList, MessageBubble, Composer, TypingIndicator, ContactFormCard, SuggestionChips
 │           ├── components/admin/     # UploadCard, StatCard, CategoryChart, LiveBadge
 │           └── pages/                # Landing.tsx, Chat.tsx, Admin.tsx, NotFound.tsx
-├── n8n/
-│   ├── README.md                     # node-by-node explanation, credentials, import/export
-│   ├── workflows/01-ingest-pdf.json  02-chat-answer.json  03-lead-email.json
-│   ├── prompts/chat-system.md  lead-summary.md
-│   └── credentials.template.json     # ${VAR} placeholders; never commit a filled copy
+│   ├── n8n/                          # workspace package (no build); mounted read-only into the n8n container at /import
+│   │   ├── README.md                 # node-by-node explanation, credentials, import/export
+│   │   ├── workflows/01-ingest-pdf.json  02-chat-answer.json  03-lead-email.json
+│   │   ├── prompts/chat-system.md  lead-summary.md
+│   │   ├── credentials.template.json # ${VAR} placeholders; never commit a filled copy
+│   │   ├── scripts/import.sh         # `pnpm n8n:import`: credentials + workflows → n8n, publish, verify
+│   │   └── test/workflows.test.ts    # Vitest contract checks on the workflow JSON
+│   └── e2e/                          # Playwright: tests/api (HTTP smoke), tests/ui (browser), tests/real (n8n + OpenAI + Resend)
 ├── infra/
-│   ├── docker-compose.yml  compose.override.yml
 │   ├── db/00-create-n8n-db.sh  01-schema.sql
 │   ├── cloudflared/README.md
-│   └── scripts/n8n-import.sh  smoke.sh  chat-eval.sh  lead-test.sh  deploy.sh (S5)
+│   └── scripts/deploy.sh
 ├── docs/  ARCHITECTURE.md  PDF-PROCESSING.md  ADMIN-DASHBOARD.md  RUNBOOK.md  SUBMISSION.md
 │          screenshots/  sample/{generate-sample-pdf.ts, cincinnati-hotel.pdf, questions.json}
 └── sprints/  README.md  STATUS.md  S0..S5-*.md
@@ -131,10 +137,11 @@ TaugaAI/
 
 Packages
 - api: `fastify@5`, `@fastify/multipart`, `@fastify/cors`, `@fastify/rate-limit`, `pg`, `zod`, `pdf-parse`; dev `typescript`, `tsx`, `@types/node`, `@types/pg`, `pino-pretty`.
-- web: `react@19`, `react-dom@19`, `react-router@7`, `tailwindcss@4`, `@tailwindcss/vite`, `recharts`, `lucide-react`, `react-markdown`, `clsx`; dev `vite`, `@vitejs/plugin-react`, `typescript`, `@playwright/test` (S3-04 only).
-- root dev: `pdfkit`, `@types/pdfkit`, `tsx`.
+- web: `react@19`, `react-dom@19`, `react-router@7`, `tailwindcss@4`, `@tailwindcss/vite`, `recharts`, `lucide-react`, `react-markdown`, `clsx`; dev `vite`, `@vitejs/plugin-react`, `typescript`.
+- tests: `vitest` (api, web, n8n), `@playwright/test` (e2e).
+- root dev: `turbo`, `pdfkit`, `@types/pdfkit`, `tsx`.
 
-Root `package.json` scripts: `dev` (api + web via `pnpm -r --parallel dev`), `build`, `typecheck`, `lint`, `smoke` (`bash infra/scripts/smoke.sh`), `sample:pdf` (`tsx docs/sample/generate-sample-pdf.ts`).
+Root `package.json` scripts run through Turborepo (`turbo.json`, `envMode: loose` so `pnpm dev` sees exported env): `dev`, `build`, `typecheck`, `lint`, `test` (Vitest in every package), `e2e` / `e2e:real` (Playwright in `apps/e2e`), `n8n:import`, `sample:pdf` (`tsx docs/sample/generate-sample-pdf.ts`).
 
 ## §3 Postgres schema — `infra/db/01-schema.sql`
 
@@ -302,7 +309,7 @@ Mock mode (`N8N_MOCK=1`): `ingest` → `chunk_count: 42`; `chat` → `answered=f
 Common
 - Every Webhook node: method POST, path `hotel/<name>`, authentication **Header Auth** (credential `Hotel Webhook Secret`: header `x-hotel-secret`), Respond = "Using 'Respond to Webhook' node".
 - The API calls `http://n8n:5678/webhook/hotel/<name>` over the Docker network with the same header. The tunnel is never involved.
-- Workflow JSON files reference credentials **by name**; `infra/scripts/n8n-import.sh` creates them with fixed ids from `n8n/credentials.template.json` (envsubst from `.env`).
+- Workflow JSON files reference credentials **by name**; `apps/n8n/scripts/import.sh` creates them with fixed ids from `apps/n8n/credentials.template.json` (envsubst from `.env`).
   Fixed credential ids: `cred-openai`, `cred-postgres`, `cred-webhook-secret`, `cred-resend` (names in the table below).
 - Fixed workflow ids (the top-level `"id"` in each JSON): `hotelIngestPdf01` (WF1), `hotelChatAnswr02` (WF2), `hotelLeadEmail03` (WF3). Re-imports overwrite in place.
 - Activation on n8n 2.45.5: `import:workflow --separate` → `publish:workflow --id=<id>` for each workflow → restart n8n. `update:workflow --active` is deprecated on 2.x and is not used. A workflow that is not published answers its webhook with 404.
@@ -333,7 +340,7 @@ Input: `{ "session_id", "message_id", "question", "document_id", "history": [{ "
 4. `Code` "Build context" — Run Once for All Items. Collects `document.pageContent` + `score` from all input items into ONE item:
    `{ context: "[1] ...\n\n[2] ...", best_score, n_chunks, question, history, document_id }` (`context = ""` and `n_chunks = 0` when nothing returned). Formats `history` as `Guest: ...\nAssistant: ...` lines.
 5. `Has context?` (IF) — `n_chunks > 0`. **False** → skip the LLM and go straight to step 6 (no chat call is made; the guard returns the canned sentence). **True** → the LLM branch below.
-   - `Basic LLM Chain` — prompt = `n8n/prompts/chat-system.md` with `{{ context }}`, `{{ history }}`, `{{ question }}` substituted; "Require Specific Output Format" on; On Error: Continue (errors reach step 6 as `{ error }`)
+   - `Basic LLM Chain` — prompt = `apps/n8n/prompts/chat-system.md` with `{{ context }}`, `{{ history }}`, `{{ question }}` substituted; "Require Specific Output Format" on; On Error: Continue (errors reach step 6 as `{ error }`)
    - `OpenAI Chat Model` — `gpt-4.1-mini`, temperature 0, max tokens 600, `responsesApiEnabled: false` (Chat Completions API, deliberately not the Responses API)
    - `Structured Output Parser` — JSON schema, **`autoFix: true`** (the same model gets one repair attempt on malformed output):
      `{ "answer": string, "category": enum[8 categories] (with one-line descriptions), "answered": boolean }`
@@ -342,8 +349,8 @@ Input: `{ "session_id", "message_id", "question", "document_id", "history": [{ "
    - category not in taxonomy → `Other`
    - parse failure / missing fields → `answered=false`, `category="Other"`, canned answer (HTTP 200 to the API)
    - **error split:** a parser failure (`doesn't fit required format`, `empty response to the Structured Output Parser`, `Failed to parse`, `Unable to parse`) is a canned 200 as above. Any other error (OpenAI auth, quota, rate limit, network, timeout) makes the guard throw → webhook returns 500 → API answers `502 ASSISTANT_UNAVAILABLE`. An outage is not reported as "unknown", so the contact form is not offered for it.
-   - **retrieval score:** the PGVector `score` is a cosine **distance** (lower = more similar; `0` identical). The score guard is **off by default** (`SCORE_GUARD = 0`). When it is set above 0 it is a maximum distance; `Other` is exempt. See `n8n/README.md` "Retrieval score semantics".
-   - optional score guard, **off by default**: workflow static value `SCORE_GUARD = 0`; when set, `best_score` worse than threshold → `answered=false` (S2-02 records the calibrated score semantics in `n8n/README.md`)
+   - **retrieval score:** the PGVector `score` is a cosine **distance** (lower = more similar; `0` identical). The score guard is **off by default** (`SCORE_GUARD = 0`). When it is set above 0 it is a maximum distance; `Other` is exempt. See `apps/n8n/README.md` "Retrieval score semantics".
+   - optional score guard, **off by default**: workflow static value `SCORE_GUARD = 0`; when set, `best_score` worse than threshold → `answered=false` (S2-02 records the calibrated score semantics in `apps/n8n/README.md`)
    - attach `sources: [{chunk_index, score}]`, `model`, `latency_ms`
 7. `Respond to Webhook` — `{ "answer", "category", "answered", "sources", "model" }`
 
@@ -351,15 +358,15 @@ Input: `{ "session_id", "message_id", "question", "document_id", "history": [{ "
 Input: `{ "lead": { "name", "phone", "email" }, "session_id", "unanswered_question", "transcript": [{ "role", "content", "created_at" }] }`
 
 1. `Webhook`
-2. `Basic LLM Chain` "Summarize conversation" — prompt `n8n/prompts/lead-summary.md` → 3–5 sentence summary + bullet list of unanswered questions. Settings → **On Error: Continue** (email still goes out with the raw transcript if the LLM fails)
+2. `Basic LLM Chain` "Summarize conversation" — prompt `apps/n8n/prompts/lead-summary.md` → 3–5 sentence summary + bullet list of unanswered questions. Settings → **On Error: Continue** (email still goes out with the raw transcript if the LLM fails)
    - `OpenAI Chat Model` — `gpt-4.1-mini`, temperature 0.2
 3. `Code` "Compose email" — builds `subject`, `html`, `text`: lead details table, summary, highlighted unanswered question, full transcript
 4. `HTTP Request` — POST `https://api.resend.com/emails`, credential `Resend` (Header Auth `Authorization: Bearer <RESEND_API_KEY>`), JSON body
    `{ from: EMAIL_FROM, to: [LEAD_TO entries], reply_to: lead.email, subject: "Cincinnati Hotel chatbot — contact request from <name>", html, text }`
-   (`LEAD_TO` is a comma-separated list. `infra/scripts/n8n-import.sh` substitutes `${EMAIL_FROM}` and `${LEAD_TO}` into the `Compose email` code node at import time, and the node splits `LEAD_TO` on commas. The repo JSON keeps the placeholders, so no real address is committed. If either value is empty, the `Compose email` node throws and the lead is recorded with `emailStatus: failed`.)
+   (`LEAD_TO` is a comma-separated list. `apps/n8n/scripts/import.sh` substitutes `${EMAIL_FROM}` and `${LEAD_TO}` into the `Compose email` code node at import time, and the node splits `LEAD_TO` on commas. The repo JSON keeps the placeholders, so no real address is committed. If either value is empty, the `Compose email` node throws and the lead is recorded with `emailStatus: failed`.)
 5. `Respond to Webhook` — `{ "ok": true, "email_id": "<resend id>", "summary": "..." }`
 
-### Credentials (`n8n/credentials.template.json`)
+### Credentials (`apps/n8n/credentials.template.json`)
 | Name | Type | From env |
 |---|---|---|
 | `OpenAI account` | OpenAI API | `OPENAI_API_KEY` |
@@ -367,7 +374,7 @@ Input: `{ "lead": { "name", "phone", "email" }, "session_id", "unanswered_questi
 | `Hotel Webhook Secret` | Header Auth (`x-hotel-secret`) | `N8N_WEBHOOK_SECRET` |
 | `Resend` | Header Auth (`Authorization: Bearer …`) | `RESEND_API_KEY` |
 
-### Grounding prompt — `n8n/prompts/chat-system.md`
+### Grounding prompt — `apps/n8n/prompts/chat-system.md`
 ```
 You are the virtual concierge of Cincinnati Hotel. You answer guests' questions using ONLY the
 "Hotel information" excerpts below. The excerpts come from the hotel's official document.
@@ -438,7 +445,7 @@ location / { try_files $uri /index.html; }
 
 ## §7 Docker Compose and environment
 
-`infra/docker-compose.yml`
+`compose.yml`
 ```yaml
 name: cincinnati-hotel
 services:
@@ -451,7 +458,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}            # hotel
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./db:/docker-entrypoint-initdb.d:ro
+      - ./infra/db:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
@@ -486,7 +493,7 @@ services:
       N8N_PERSONALIZATION_ENABLED: "false"
     volumes:
       - n8n_data:/home/node/.n8n
-      - ../n8n:/import:ro
+      - ./apps/n8n:/import:ro
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:5678/healthz || exit 1"]
       interval: 10s
@@ -494,7 +501,7 @@ services:
       retries: 30
 
   api:
-    build: { context: .., dockerfile: apps/api/Dockerfile }
+    build: { context: ., dockerfile: apps/api/Dockerfile }
     restart: unless-stopped
     depends_on:
       postgres: { condition: service_healthy }
@@ -518,7 +525,7 @@ services:
       retries: 10
 
   web:
-    build: { context: .., dockerfile: apps/web/Dockerfile }
+    build: { context: ., dockerfile: apps/web/Dockerfile }
     restart: unless-stopped
     depends_on: [api]
 
@@ -536,14 +543,14 @@ volumes:
   uploads:
 ```
 
-`infra/compose.override.yml` (dev only; auto-merged when running from `infra/`, or pass `-f` both; deploy uses `-f docker-compose.yml` only)
+`compose.override.yml` (dev only; plain `docker compose` at the repo root auto-merges it; deploy uses `-f compose.yml` only, or `COMPOSE_FILE=compose.yml` in the VPS `.env`)
 - ports: postgres `${POSTGRES_HOST_PORT:-5432}:5432`, n8n `5678:5678`, api `${API_HOST_PORT:-3000}:3000`, web `8080:80`
 - n8n env: `N8N_PROTOCOL=http`, `N8N_HOST=localhost`, `N8N_WEBHOOK_URL=http://localhost:5678/`, `N8N_EDITOR_BASE_URL=http://localhost:5678/`, `N8N_SECURE_COOKIE=false`
 
-Production: `docker compose --env-file .env -f infra/docker-compose.yml --profile tunnel up -d --build` (no override file; see `infra/cloudflared/README.md`).
+Production: `docker compose -f compose.yml --profile tunnel up -d --build` (no override file; see `infra/cloudflared/README.md`).
 
 Compose conventions
-- Compose reads variables from the **project directory**, which is `infra/` for these files. Always pass `--env-file .env` (repo root) so the `.env` at the repo root is used. Without it, `${POSTGRES_USER}` and friends are empty.
+- Both compose files live at the repo root, which is the compose project directory, so `.env` there is read automatically. No `--env-file` or `-f` flags are needed in dev. Shell variables win over `.env` (e.g. `N8N_MOCK=1 docker compose up -d api`).
 - Dev host ports are overridable: `API_HOST_PORT` (default 3000) and `POSTGRES_HOST_PORT` (default 5432) in `.env`, for when those ports are already taken on the host. The web port 8080 and n8n port 5678 are fixed in the override.
 - Healthchecks call `127.0.0.1`, not `localhost`. Alpine resolves `localhost` to `::1` first, and the services listen on IPv4 only, so a `localhost` check would fail.
 
@@ -567,7 +574,7 @@ OPENAI_API_KEY=
 RESEND_API_KEY=
 EMAIL_FROM="Cincinnati Hotel Assistant <concierge@example.com>"
 LEAD_TO=idan@tauga.ai,deleonajiraydiego@gmail.com
-# Optional: n8n owner account used by infra/scripts/n8n-import.sh automation
+# Optional: n8n owner account used by apps/n8n/scripts/import.sh automation
 # N8N_OWNER_EMAIL=
 # N8N_OWNER_PASSWORD=
 
@@ -578,25 +585,26 @@ API_HOST_PORT=3000
 POSTGRES_HOST_PORT=5432
 ```
 
-Local dev without containers for api/web: `docker compose --env-file .env -f infra/docker-compose.yml up -d postgres n8n`, then `pnpm dev`. The API does not read `.env` itself, so export the variables first, with `DATABASE_URL=postgres://hotel:…@localhost:5432/hotel` (or the `POSTGRES_HOST_PORT` you set), `N8N_BASE_URL=http://localhost:5678`, `INTERNAL_BASE_URL=http://host.docker.internal:3000` (so n8n in Docker can reach the host API), and the `N8N_WEBHOOK_SECRET` from `.env`. The step-by-step version is in `docs/RUNBOOK.md`.
+Local dev without containers for api/web: `docker compose up -d postgres n8n`, then `pnpm dev`. The API does not read `.env` itself, so export the variables first, with `DATABASE_URL=postgres://hotel:…@localhost:5432/hotel` (or the `POSTGRES_HOST_PORT` you set), `N8N_BASE_URL=http://localhost:5678`, `INTERNAL_BASE_URL=http://host.docker.internal:3000` (so n8n in Docker can reach the host API), and the `N8N_WEBHOOK_SECRET` from `.env`. The step-by-step version is in `docs/RUNBOOK.md`.
 
 ngrok alternative (`infra/cloudflared/README.md`): one ngrok agent with two tunnels (`web` → 8080, `n8n` → 5678) or two `ngrok http` processes; set `N8N_HOST` / `N8N_WEBHOOK_URL` / `N8N_EDITOR_BASE_URL` to the ngrok n8n hostname.
 
 ## §8 Verification
 
-1. **Local full stack**: `docker compose --env-file .env -f infra/docker-compose.yml -f infra/compose.override.yml up -d --build`. First run: open `http://localhost:5678`, create the owner account, run `bash infra/scripts/n8n-import.sh`. Step-by-step in `docs/RUNBOOK.md`.
+1. **Local full stack**: `docker compose up -d --build`. First run: open `http://localhost:5678`, create the owner account, run `pnpm n8n:import`. Step-by-step in `docs/RUNBOOK.md`.
 2. **Seed**: `pnpm sample:pdf` (already committed) → upload via `http://localhost:8080/admin` or `curl -F file=@docs/sample/cincinnati-hotel.pdf localhost:8080/api/admin/document`.
-3. **Scripted smoke** `bash infra/scripts/smoke.sh --base http://localhost:8080`:
+0. **Unit / contract** `pnpm test` (Vitest, no stack): API routes with a mocked DB, n8n client, category parity across API / web / SQL / WF2, workflow JSON + prompt sync.
+3. **HTTP smoke** `apps/e2e/tests/api/smoke.spec.ts` (`pnpm e2e`, or `pnpm e2e:real` with the `real` project):
    - upload → `status=ready`, `chunkCount > 10` (mock: 42)
    - `POST /api/sessions` → id
    - "What time is check-in?" → `answered=true`, content contains "3", category ∈ {Pricing & Booking, Policies}
    - "Is there a helipad on the roof?" → `answered=false`, content == canned sentence, `offerContactForm=true`
    - `POST /api/leads` → 201, `emailStatus=sent` (mock: sent)
    - `GET /api/admin/stats` → totals incremented, byCategory contains the category above
-   - `curl -N --max-time 4 .../stats/stream | grep -m1 'event: stats'`
-4. **Accuracy set** `docs/sample/questions.json` (6 answerable + 4 unanswerable): ≥ 9/10 correct `answered` (S2-02, S4-01).
-5. **Playwright** (S3-04, droppable): user journey + admin realtime across two pages.
-6. **Public**: re-run smoke against `https://hotel.<domain>`; confirm n8n executions visible at `https://n8n.<domain>`.
+   - `GET /api/admin/stats/stream` → `text/event-stream` with `: ping` and `event: stats`
+4. **Accuracy set** `docs/sample/questions.json` (6 answerable + 4 unanswerable): ≥ 9/10 correct `answered` (S2-02, S4-01) — `apps/e2e/tests/real/chat-eval.spec.ts`.
+5. **Browser** `apps/e2e/tests/ui/`: user journey (mock) + admin realtime across two pages.
+6. **Public**: `E2E_BASE_URL=https://hotel.<domain> pnpm e2e`; confirm n8n executions visible at `https://n8n.<domain>`.
 
 ## §9 Risks
 
