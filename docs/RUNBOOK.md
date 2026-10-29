@@ -267,17 +267,17 @@ workflow or credential changed. The `n8n_data` and `pgdata` volumes survive rebu
 
 ### Memory budget
 
-`compose.yml` caps the whole stack below 1 GB so it fits a 4 GB VPS with room to spare.
+`compose.yml` caps the whole stack at about 1.3 GB so it fits a 4 GB VPS with room to spare.
 
 | Service | `mem_limit` | Tuning |
 |---|---|---|
 | postgres | 144m | `shared_buffers=48MB`, `max_connections=30`, `work_mem=4MB`, `maintenance_work_mem=32MB` |
-| n8n | 640m | main heap 320 MB, Code-node task runner heap 96 MB, runner concurrency 2 |
+| n8n | 1g | main heap 640 MB, Code-node task runner heap 128 MB, runner concurrency 1 |
 | api | 128m | heap 96 MB, pg pool `max: 5` |
 | web | 16m | nginx `worker_processes 1` |
 | cloudflared | 48m | |
 
-Total cap is 976m. Measured after a full `pnpm e2e` run (real mode): n8n ~490 MiB (main process plus an always-on
+Total cap is 1360m. Measured after a full `pnpm e2e` run (real mode): n8n ~490 MiB (main process plus an always-on
 JS task runner of ~130 MiB), api ~75, postgres ~45, nginx ~3, about 610 MiB without cloudflared. The peak is a PDF
 upload, which n8n parses in-process.
 
@@ -285,6 +285,10 @@ upload, which n8n parses in-process.
 - Check for OOM kills: `docker inspect --format '{{.Name}} {{.State.OOMKilled}}' $(docker compose -f compose.yml ps -q)`.
   If n8n gets killed during an ingest, raise its `mem_limit` (and `NODE_OPTIONS` heap) and take the difference from
   postgres, which rarely goes past ~60 MiB here.
+- A V8 heap crash does not show as an OOM kill. If n8n restarts and `docker compose -f compose.yml logs n8n` shows
+  `FATAL ERROR: ... JavaScript heap out of memory`, the `NODE_OPTIONS` heap is too small (a 320 MB heap died on the
+  first PDF ingest + chat). Raise it together with `mem_limit`, keeping ~300 MB between the two for non-heap memory
+  and the task runner.
 - n8n stores only failed executions (`EXECUTIONS_DATA_SAVE_ON_SUCCESS=none`), pruned after 72 h. To debug a
   successful run, open the workflow in the editor and run it manually; the output shows live but is not saved.
 - Recommended safety net on the VPS: a 1–2 GB swapfile

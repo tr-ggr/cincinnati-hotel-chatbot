@@ -1,6 +1,6 @@
 # Run from the repo root: `docker compose up -d --build` (dev, merges compose.override.yml).
 # Deploy: `docker compose -f compose.yml --profile tunnel up -d --build`. Compose reads ./.env automatically.
-# Memory budget (4 GB VPS, whole stack < 1 GB): postgres 144m + n8n 640m + api 128m + web 16m + cloudflared 48m = 976m.
+# Memory budget (4 GB VPS): postgres 144m + n8n 1g + api 128m + web 16m + cloudflared 48m = 1360m.
 # Node heap caps (NODE_OPTIONS / N8N_RUNNERS_MAX_OLD_SPACE_SIZE) sit below each mem_limit so V8 GCs before the OOM killer.
 name: cincinnati-hotel
 services:
@@ -31,7 +31,7 @@ services:
   n8n:
     image: n8nio/n8n:${N8N_VERSION}          # pinned; never :latest
     restart: unless-stopped
-    mem_limit: 640m
+    mem_limit: 1g
     depends_on:
       postgres: { condition: service_healthy }
     environment:
@@ -58,9 +58,15 @@ services:
       N8N_VERSION_NOTIFICATIONS_ENABLED: "false"
       N8N_TEMPLATES_ENABLED: "false"
       # Memory: cap the main heap and the Code-node task runner (an always-on child process in internal mode).
-      NODE_OPTIONS: --max-old-space-size=320
-      N8N_RUNNERS_MAX_OLD_SPACE_SIZE: 96
-      N8N_RUNNERS_MAX_CONCURRENCY: 2
+      # Main parses PDFs in-process (pdf.js) and loads the LangChain nodes; 320 MB ran out of heap on the VPS.
+      NODE_OPTIONS: --max-old-space-size=640
+      N8N_RUNNERS_MAX_OLD_SPACE_SIZE: 128
+      N8N_RUNNERS_MAX_CONCURRENCY: 1
+      # Pin defaults n8n plans to change (silences the startup deprecation notices).
+      N8N_RUNNERS_TASK_TIMEOUT: 60
+      N8N_UNVERIFIED_PACKAGES_ENABLED: "false"
+      N8N_COMPRESSION_NODE_MAX_DECOMPRESSED_SIZE_BYTES: 268435456
+      N8N_COMPRESSION_NODE_MAX_ZIP_ENTRIES: 1000
       # Keep only failed executions, pruned after 72 h.
       EXECUTIONS_DATA_SAVE_ON_SUCCESS: none
       EXECUTIONS_DATA_SAVE_ON_ERROR: all
