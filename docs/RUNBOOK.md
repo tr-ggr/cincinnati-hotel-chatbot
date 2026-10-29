@@ -39,21 +39,21 @@ openssl rand -hex 24   # and another one for N8N_WEBHOOK_SECRET
 
 | Variable | Required | Read by | Purpose |
 |---|---|---|---|
-| `POSTGRES_USER` | yes | compose (postgres, n8n, api `DATABASE_URL`), `n8n-import.sh` | Database superuser. The default `hotel` is fine locally |
+| `POSTGRES_USER` | yes | compose (postgres, n8n, api `DATABASE_URL`), `apps/n8n/scripts/import.sh` | Database superuser. The default `hotel` is fine locally |
 | `POSTGRES_PASSWORD` | yes | same as above | Database password. Change it from `change-me` |
 | `POSTGRES_DB` | yes | same as above | App database, `hotel`. n8n uses a second database, `n8n`, created on first start |
 | `N8N_VERSION` | yes | compose (image tag) | Pinned n8n version, `2.45.5`. Never `latest` |
 | `N8N_ENCRYPTION_KEY` | yes | compose (n8n) | Encrypts n8n credentials. Keep it stable: a new key makes stored credentials unreadable |
 | `N8N_HOST` | production | compose (n8n URLs) | Editor host, for example `n8n.example.com`. Local dev uses `localhost` from the override |
-| `N8N_WEBHOOK_SECRET` | yes, even in mock mode | compose (api), `n8n-import.sh` (credential `Hotel Webhook Secret`) | Shared secret in the `x-hotel-secret` header. The API refuses to start if it is empty |
+| `N8N_WEBHOOK_SECRET` | yes, even in mock mode | compose (api), `apps/n8n/scripts/import.sh` (credential `Hotel Webhook Secret`) | Shared secret in the `x-hotel-secret` header. The API refuses to start if it is empty |
 | `N8N_MOCK` | no (default `0`) | compose (api) | `1` replaces n8n and OpenAI calls with an in-process mock. Use for a no-keys demo |
 | `PUBLIC_WEB_HOST` | no | nothing in the repo reads it | Informational. The public hostname is set in the Cloudflare dashboard |
 | `CLOUDFLARE_TUNNEL_TOKEN` | production | compose (cloudflared, profile `tunnel`) | Tunnel token from Zero Trust |
-| `OPENAI_API_KEY` | real mode | `n8n-import.sh` into the `OpenAI account` credential | Never read by the API |
-| `RESEND_API_KEY` | real mode | `n8n-import.sh` into the `Resend` credential | Never read by the API |
-| `EMAIL_FROM` | real mode | `n8n-import.sh` into WF3 `Compose email` | Sender, for example `"Cincinnati Hotel Assistant <concierge@example.com>"`. Empty makes the lead flow fail |
-| `LEAD_TO` | real mode | `n8n-import.sh` into WF3 `Compose email` | Comma-separated recipients. **Use your own inbox while testing**. Empty makes the lead flow fail |
-| `N8N_OWNER_EMAIL`, `N8N_OWNER_PASSWORD` | no | nothing in the repo reads them | Used by hand in the local owner-setup `curl` below. The template comment says `n8n-import.sh` reads them; it does not |
+| `OPENAI_API_KEY` | real mode | `apps/n8n/scripts/import.sh` into the `OpenAI account` credential | Never read by the API |
+| `RESEND_API_KEY` | real mode | `apps/n8n/scripts/import.sh` into the `Resend` credential | Never read by the API |
+| `EMAIL_FROM` | real mode | `apps/n8n/scripts/import.sh` into WF3 `Compose email` | Sender, for example `"Cincinnati Hotel Assistant <concierge@example.com>"`. Empty makes the lead flow fail |
+| `LEAD_TO` | real mode | `apps/n8n/scripts/import.sh` into WF3 `Compose email` | Comma-separated recipients. **Use your own inbox while testing**. Empty makes the lead flow fail |
+| `N8N_OWNER_EMAIL`, `N8N_OWNER_PASSWORD` | no | nothing in the repo reads them | Used only by the local owner-setup `curl` below |
 | `API_HOST_PORT` | no (default `3000`) | `compose.override.yml` | Host port for the API container, dev only |
 | `POSTGRES_HOST_PORT` | no (default `5432`) | `compose.override.yml` | Host port for Postgres, dev only |
 | `API_PORT` | no (default `3000`) | `apps/web/vite.config.ts` | Where the Vite dev server proxies `/api`. Shell variable, not in `.env` |
@@ -103,6 +103,9 @@ Real mode sends embeddings and chat to OpenAI, and lead emails through Resend.
    curl -F file=@docs/sample/cincinnati-hotel.pdf http://localhost:8080/api/admin/document
    ```
 
+   The API answers `202` with `status: "processing"` straight away and ingests in the background. Poll
+   `curl -s http://localhost:8080/api/admin/document` until the new document shows `"status":"ready"`.
+
 5. Run the real-mode tests (this uploads the sample PDF again and sends two real lead emails to `LEAD_TO`):
 
    ```bash
@@ -110,9 +113,11 @@ Real mode sends embeddings and chat to OpenAI, and lead emails through Resend.
    ```
 
    On top of the HTTP and UI checks it runs the accuracy set (`e2e/tests/real/chat-eval.spec.ts`): it prints
-   question, expected, actual, category and `best_score` for each question, and passes when at least 9 of the 10
-   `answered` flags match. The lead spec posts straight to the WF3 webhook and passes when n8n returns `ok: true` and
-   an `email_id`. Both lead tests skip themselves when `LEAD_TO` is empty or contains a reviewer address.
+   question, expected, actual, category and `best_score` for each question, and passes when the `answered` flags match
+   the expected verdicts (see the spec for the exact threshold). The set covers answerable, unanswerable, off-topic,
+   prompt-injection and partial questions. The lead spec posts straight to the WF3 webhook and passes when n8n returns
+   `ok: true` and an `email_id`. The smoke lead step skips itself when `LEAD_TO` contains a reviewer address;
+   `lead.spec.ts` also skips when `LEAD_TO` is empty.
 
 Useful links in local mode: web <http://localhost:8080>, n8n editor <http://localhost:5678>, API health
 <http://localhost:8080/api/health>.
@@ -197,9 +202,9 @@ Turborepo runs every package's scripts from the root. Two layers:
 
 | Package | What it checks |
 |---|---|
-| `apps/api/test/` | Config validation, the n8n client (mock and HTTP, error mapping), routes through `buildApp` + `app.inject()` with the DB mocked (error envelope, `NO_DOCUMENT`, contact-form flag, leads, `/internal` secret), and the category list against `apps/web` and the `migrations/01-schema.sql` CHECK constraint |
+| `apps/api/test/` | Config validation, the n8n client (mock and HTTP, error mapping), routes through `buildApp` + `app.inject()` with the DB and n8n client mocked (error envelope, health 503, `NO_DOCUMENT`, contact-form flag, a failed question is deleted, lead email retry, `202` upload with background ingest and failure cleanup, `pendingDocument` in the stats, `/internal` secret), and the category list against `apps/web` and the `migrations/01-schema.sql` CHECK constraint |
 | `apps/web/src/lib/*.test.ts` | `api.ts` (URLs, bodies, error envelope → `ApiError`), `format.ts` |
-| `apps/n8n/test/` | Workflow JSON: fixed ids, secret-protected `hotel/*` webhooks, no inline keys, Structured Output Parser enum and Guard constants match the API, `prompts/chat-system.md` matches the prompt embedded in WF2, credential template placeholders |
+| `apps/n8n/test/` | Workflow JSON: fixed ids, secret-protected `hotel/*` webhooks, no inline keys, Structured Output Parser enum and Guard constants match the API, the `partial` field and Guard handling, `prompts/chat-system.md` matches the WF2 system message, WF1 has no purge query, credential template placeholders |
 
 Run one package with `pnpm --filter api test` (or `web`, `n8n`).
 
@@ -254,30 +259,37 @@ Before you start, create the tunnel and its two public hostnames in the Cloudfla
    `docker compose -f compose.yml ps`.
 5. **Create the n8n owner account in the UI** at `https://n8n.<domain>`. The local shortcut is for dev only.
 6. **Import the workflows**: `bash apps/n8n/scripts/import.sh --prod`.
-7. **Upload the PDF** at `https://hotel.<domain>/admin` and wait for **Ready**.
+7. **Upload the PDF** at `https://hotel.<domain>/admin` and wait for **Ready** (the card follows the background ingest).
 8. **Public end-to-end test** (from your machine): `E2E_BASE_URL=https://hotel.<domain> pnpm e2e`. In real mode this
    sends one lead email to `LEAD_TO`. The `real` project needs n8n on `E2E_N8N_URL` with the webhook secret, so run
    it locally rather than against production.
 
-Afterwards, failed executions are visible at `https://n8n.<domain>` (successful runs are not stored, see
+Afterwards, every execution is visible at `https://n8n.<domain>` → Executions (pruned after 72 h, see
 [Memory budget](#memory-budget)), and the dashboard is at `https://hotel.<domain>/admin`.
 
 Updating: `git pull --ff-only`, re-run the step 4 command, and re-run `bash apps/n8n/scripts/import.sh --prod` if any
 workflow or credential changed. The `n8n_data` and `pgdata` volumes survive rebuilds.
 
+The SQL in `migrations/` runs only when the `pgdata` volume is empty. When `migrations/02-stats-view.sql` changes,
+re-apply it to the running database (it is a `CREATE OR REPLACE VIEW`, so it is safe to run again):
+
+```bash
+docker compose -f compose.yml exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" < migrations/02-stats-view.sql
+```
+
 ### Memory budget
 
-`compose.yml` caps the whole stack at about 1.3 GB so it fits a 4 GB VPS with room to spare.
+`compose.yml` caps the whole stack at about 1.4 GB so it fits a 4 GB VPS with room to spare.
 
 | Service | `mem_limit` | Tuning |
 |---|---|---|
 | postgres | 144m | `shared_buffers=48MB`, `max_connections=30`, `work_mem=4MB`, `maintenance_work_mem=32MB` |
 | n8n | 1g | main heap 640 MB, Code-node task runner heap 128 MB, runner concurrency 1 |
-| api | 128m | heap 96 MB, pg pool `max: 5` |
+| api | 192m | heap 128 MB, pg pool `max: 5`; uploads capped at 10 MB (`MAX_UPLOAD_MB`) because pdf-parse reads the whole file |
 | web | 16m | nginx `worker_processes 1` |
 | cloudflared | 48m | |
 
-Total cap is 1360m. Measured after a full `pnpm e2e` run (real mode): n8n ~490 MiB (main process plus an always-on
+Total cap is 1424m. Measured after a full `pnpm e2e` run (real mode): n8n ~490 MiB (main process plus an always-on
 JS task runner of ~130 MiB), api ~75, postgres ~45, nginx ~3, about 610 MiB without cloudflared. The peak is a PDF
 upload, which n8n parses in-process.
 
@@ -289,8 +301,9 @@ upload, which n8n parses in-process.
   `FATAL ERROR: ... JavaScript heap out of memory`, the `NODE_OPTIONS` heap is too small (a 320 MB heap died on the
   first PDF ingest + chat). Raise it together with `mem_limit`, keeping ~300 MB between the two for non-heap memory
   and the task runner.
-- n8n stores only failed executions (`EXECUTIONS_DATA_SAVE_ON_SUCCESS=none`), pruned after 72 h. To debug a
-  successful run, open the workflow in the editor and run it manually; the output shows live but is not saved.
+- n8n stores every production execution, successful and failed (`EXECUTIONS_DATA_SAVE_ON_SUCCESS=all`), so reviewers
+  can open real runs in the Executions list. Data is pruned after 72 h or 1000 executions, and lives in Postgres, not in
+  n8n's memory.
 - Recommended safety net on the VPS: a 1–2 GB swapfile
   (`fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile`, plus an `/etc/fstab` entry).
 
@@ -316,7 +329,7 @@ exactly, including `&` and spacing.
 4. `apps/n8n/workflows/02-chat-answer.json`: add the value to the `enum` of the **Structured Output Parser** schema. Also add
    it to the `CATEGORIES` array in the **Guard & finalize** code node, or the guard will rewrite it to `Other`.
 5. `apps/n8n/prompts/chat-system.md`: add it to rule 5's list, then paste the same text into the **Basic LLM Chain** node
-   and run the prompt sync check in [`../apps/n8n/README.md`](../apps/n8n/README.md#overview). The `CATEGORIES` list in the Guard
+   and run the prompt sync check (`pnpm --filter n8n test`, see [`../apps/n8n/README.md`](../apps/n8n/README.md)). The `CATEGORIES` list in the Guard
    code is the list step 4 describes.
 
 Then re-import with `pnpm n8n:import` and rerun `pnpm e2e:real`.
@@ -330,7 +343,7 @@ Then re-import with `pnpm n8n:import` and rerun `pnpm e2e:real`.
   Details in [`../apps/n8n/README.md`](../apps/n8n/README.md#changing-the-openai-model).
 - **Another provider.** The API has no provider code, so only n8n changes: replace the chat and embedding nodes in
   WF1, WF2 and WF3 with the provider's n8n nodes, add a credential to `apps/n8n/credentials.template.json` and a variable to
-  `.env.example`, and update the `OPENAI_API_KEY` check in `n8n-import.sh`, which is hard-coded for OpenAI and only
+  `.env.example`, and update the `OPENAI_API_KEY` check in `apps/n8n/scripts/import.sh`, which is hard-coded for OpenAI and only
   warns when it is empty. Keep the output contract of WF2 (`answer`, `category`, `answered`, `sources`) so the API does
   not change. Embedding dimensions must still match the schema, or the schema must change too.
 
@@ -354,7 +367,8 @@ Then rename the exported files to `01-ingest-pdf.json`, `02-chat-answer.json` an
 diff before committing:
 
 - `03-lead-email.json` will contain the real `EMAIL_FROM` and `LEAD_TO` values in `Compose email`. Put back the
-  placeholders `${EMAIL_FROM}` and `${LEAD_TO}`, so no real address enters git.
+  placeholders `${EMAIL_FROM_JSON}` and `${LEAD_TO_JSON}` (unquoted, see `apps/n8n/README.md`), so no real address
+  enters git.
 - Every file must keep its top-level `"id"`. The `active` flag is not a reason for a change, because activation is done
   by the import script.
 
@@ -392,17 +406,17 @@ diff before committing:
 | Chat returns `409 NO_DOCUMENT` | No document has reached **Ready** | Upload the PDF and wait for Ready |
 | Upload returns `422 EMPTY_PDF` | Fewer than 200 characters of extractable text, usually a scanned PDF | Use a PDF with a text layer. OCR is not supported |
 | Upload returns `422 INVALID_PDF` | Not a PDF, or unreadable | Check the file |
-| Upload returns `413 FILE_TOO_LARGE` | Over 25 MB (`MAX_UPLOAD_MB`). nginx accepts up to 50 MB, so the API check is what rejects it | Compress or split the PDF |
-| Upload returns `502 INGEST_FAILED` | WF1 failed: download, parsing or embeddings | Open the failing execution in the n8n Executions list. The previous document stays active |
+| Upload returns `413 FILE_TOO_LARGE` | Over 10 MB (`MAX_UPLOAD_MB`). nginx accepts up to 12 MB, so the API check is what rejects it | Compress or split the PDF |
+| The upload card shows **Failed** after "Reading the guide…" | WF1 failed: download, parsing or embeddings (`pendingDocument.error` on the stats) | Open the failing execution in the n8n Executions list. The previous document stays active and its chunks are untouched |
+| An upload stays **Failed** with "Interrupted by a server restart" | The API restarted during the background ingest | Upload the PDF again |
 | Lead shows `emailStatus: failed` | Resend key wrong, sender domain not verified, or `EMAIL_FROM` / `LEAD_TO` empty (the `Compose email` node throws) | Check the three variables, re-run the import, then `lead.spec.ts` |
-| The lead tests are skipped | `LEAD_TO` is empty or contains a reviewer address | Set `LEAD_TO` to your own inbox, re-run the import, then retry |
+| The lead tests are skipped | `LEAD_TO` contains a reviewer address (or is empty, for `lead.spec.ts`) | Set `LEAD_TO` to your own inbox, re-run the import, then retry |
 
 ### Dashboard
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| Badge stays on **Connecting** or goes to **Polling** | The SSE stream is buffered or dropped, or the API is down | Check `curl -N --max-time 4 http://localhost:8080/api/admin/stats/stream` shows `event: stats`. Behind the tunnel, check the Cloudflare hostname points at `web:80`. The page falls back to polling by design |
-| A failed question does not appear until the next change | The 502 path does not emit a stats event | Known gap, see [`ADMIN-DASHBOARD.md`](ADMIN-DASHBOARD.md#data-flow-message-to-chart) |
+| Numbers never load, or "Live updates paused, refreshing every 10 s" stays visible | The SSE stream is buffered or dropped, or the API is down | Check `curl -N --max-time 4 http://localhost:8080/api/admin/stats/stream` shows `event: stats`. Behind the tunnel, check the Cloudflare hostname points at `web:80`. The page falls back to polling by design |
 
 If something is not listed, the first place to look is `docker compose logs --tail=100 <service>`,
 followed by the n8n Executions list at `https://<N8N_HOST>` or `http://localhost:5678`.

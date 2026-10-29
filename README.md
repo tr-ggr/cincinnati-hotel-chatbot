@@ -1,5 +1,12 @@
 # Cincinnati Hotel Chatbot
 
+**Live:** <https://cincinnatihotel.tristanjamestolentino.com> · **n8n:** <https://cincinnatihotelbackend.tristanjamestolentino.com> ·
+**Reviewer guide:** [`docs/SUBMISSION.md`](docs/SUBMISSION.md)
+
+| Guest chat | Fallback + contact form | Admin dashboard |
+|---|---|---|
+| ![Guest chat answering from the PDF](docs/screenshots/chat.png) | ![Unanswered question with the contact form](docs/screenshots/fallback-form.png) | ![Admin dashboard with live stats](docs/screenshots/admin.png) |
+
 A hotel information assistant for guests. It answers **only** from the PDF an admin uploads. When it cannot answer,
 it offers a contact form, and the conversation summary is emailed to the hotel team. Admins get a live dashboard of
 sessions, questions, unanswered questions, leads and categories, which updates without a page reload.
@@ -9,10 +16,14 @@ Built for the Tauga AI entrance task. The brief is in [`docs/Cincinnati-Hotel-Ch
 ## Why it is built this way
 
 - **Grounded answers.** Retrieval is scoped to the active document. The model gets at most six excerpts and must reply
-  with the canned sentence when they do not contain the answer. When nothing is retrieved, the model is not called.
+  with the canned sentence when they do not contain the answer, or when the question is not about the hotel. When
+  nothing is retrieved, the model is not called. A half-answerable question gets the part the PDF covers plus the
+  contact form for the rest.
 - **All AI in n8n.** Ingest, retrieval, answering, classification and the lead email are visible n8n workflows. The
   API never calls OpenAI or Resend, so prompts and models can be inspected in the editor.
 - **Real-time admin.** Changes are pushed over Server-Sent Events and fall back to polling if the stream is interrupted.
+- **Safe replacement.** A new PDF is ingested in the background; the old one keeps answering until the new one is
+  ready, and its chunks are removed in the same transaction that activates the new document.
 - **One command to run.** `docker compose up` at the repo root starts Postgres with pgvector, n8n, the API and the web
   app. Production adds a Cloudflare Tunnel, so the VPS needs no open ports.
 
@@ -85,7 +96,7 @@ On Windows, if another program holds IPv4 port 8080, use <http://[::1]:8080>.
 
 1. Open <http://localhost:5678> and create the n8n owner account (once).
 2. Import the credentials and workflows from `.env` and publish them: `pnpm n8n:import`.
-3. Upload `docs/sample/cincinnati-hotel.pdf` at <http://localhost:8080/admin> and wait for **Ready**
+3. Upload `docs/sample/cincinnati-hotel.pdf` at <http://localhost:8080/admin> and wait for **Ready** (ingest runs in the background)
    (regenerate the PDF with `pnpm sample:pdf` if needed).
 
 ### 5. Run the tests
@@ -149,7 +160,7 @@ The API does not read `.env` itself. Export the variables it needs first; the ex
 |---|---|
 | `pnpm build` | `tsc` for the API, `vite build` for the web app (cached) |
 | `pnpm typecheck` | `tsc --noEmit` in api, web and e2e |
-| `pnpm lint` | ESLint in the web app |
+| `pnpm lint` | ESLint in the web app, `tsc --noEmit` in the API |
 | `pnpm test` | Vitest in api, web and n8n |
 | `pnpm --filter api test` | One package only (`web`, `n8n`, `e2e` work the same) |
 | `pnpm e2e` / `pnpm e2e:real` | Playwright in `e2e` |
@@ -165,4 +176,5 @@ The API does not read `.env` itself. Export the variables it needs first; the ex
 | [`docs/RUNBOOK.md`](docs/RUNBOOK.md) | Prerequisites, environment table, local runs, n8n import, tests, VPS deploy, extending the app, troubleshooting |
 | [`apps/n8n/README.md`](apps/n8n/README.md) | Node-by-node reference for the three workflows, credentials, import and export |
 | [`docs/CLOUDFLARE-TUNNEL.md`](docs/CLOUDFLARE-TUNNEL.md) | Public access through a Cloudflare Tunnel, or ngrok |
-| [`.claude/CLAUDE.md`](.claude/CLAUDE.md) | Conventions for AI agents working in this repository |
+| [`docs/SUBMISSION.md`](docs/SUBMISSION.md) | Reviewer guide: live links, a 60-second test script, how the brief maps to the code |
+| [`.claude/CLAUDE.md`](.claude/CLAUDE.md) | AI-assisted development conventions: the rules the coding agents followed in this repository |

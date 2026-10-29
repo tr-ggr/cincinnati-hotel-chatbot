@@ -10,14 +10,15 @@ Stack: React 19 + Vite + Tailwind v4 (`apps/web`) → nginx → Fastify 5 API (`
 Cloudflare Tunnel. **All AI logic lives in n8n workflows; the API never calls OpenAI directly.**
 
 Read `docs/ARCHITECTURE.md` first — it is the single source of truth for the schema, API contract, n8n
-workflows, compose topology and prompts. Sprint cards reference its sections (§).
+workflows, compose topology and prompts.
 
 ## Commands
 - Install: `pnpm install` (pnpm 11; Node ≥ 22 locally, node:22-alpine in containers)
 - Dev stack: `docker compose up -d postgres n8n` then `pnpm dev` (api :3000, web :5173)
 - Full stack: `docker compose up -d --build --wait` → web http://localhost:8080, n8n http://localhost:5678
   (run at the repo root; `compose.override.yml` is auto-merged locally and exposes ports; deploy uses `-f compose.yml` only)
-- Postgres init: `migrations/` (`00-create-n8n-db.sh`, `01-schema.sql`) runs only on an empty `pgdata` volume.
+- Postgres init: `migrations/` (`00-create-n8n-db.sh`, `01-schema.sql`, `02-stats-view.sql`) runs only on an empty `pgdata` volume.
+  `02-stats-view.sql` is idempotent; re-apply it to a live database when it changes (see `docs/RUNBOOK.md`).
 - Turborepo runs every task: `pnpm typecheck`, `pnpm build`, `pnpm lint`, `pnpm test` (Vitest: api, web, n8n)
 - E2E (Playwright, `e2e/` at the root, stack must be running): `pnpm e2e` (api + ui projects), `pnpm e2e:real` (+ accuracy set and
   lead webhook; sends real email to `LEAD_TO`). First time: `pnpm --filter e2e browsers`. Override target with `E2E_BASE_URL`.
@@ -35,9 +36,11 @@ workflows, compose topology and prompts. Sprint cards reference its sections (§
 - Errors: `{ error: { code, message } }`. Codes are UPPER_SNAKE (`NO_DOCUMENT`, `ASSISTANT_UNAVAILABLE`, `INVALID_PDF`, `EMPTY_PDF`, `INGEST_FAILED`).
 - Secrets only in `.env` (never committed). `apps/n8n/credentials.template.json` uses `${VAR}` placeholders filled by envsubst at import time.
 - n8n workflow JSON in `apps/n8n/workflows/` is the source of truth. After editing in the UI, re-export:
-  `docker compose exec n8n n8n export:workflow --all --separate --output=/import/workflows`
+  `docker compose exec -T n8n n8n export:workflow --all --separate --output=/tmp/wf` then
+  `docker compose cp n8n:/tmp/wf/. apps/n8n/workflows/` (`/import` is mounted read-only). Put the `${EMAIL_FROM_JSON}` /
+  `${LEAD_TO_JSON}` placeholders back in `03-lead-email.json` before committing.
 - Never float `n8nio/n8n:latest`; `N8N_VERSION` is pinned in `.env(.example)`.
-- Keep the UI dependency-light: Tailwind v4, lucide-react, react-markdown, clsx. No shadcn, no chart or state libraries. Visual system: `apps/web/DESIGN.md`.
+- Keep the UI dependency-light: Tailwind v4, lucide-react, react-markdown (+ remark-gfm), clsx. No shadcn, no chart or state libraries. Visual system: `apps/web/DESIGN.md`.
 - Tests: API tests live in `apps/api/test/` (outside `src/`, so `tsc` builds ignore them) and use `buildApp` from `src/app.ts`;
   web tests sit next to the code as `*.test.ts`. The category / prompt parity tests enforce the two rules above.
 - Ports: web 8080 (nginx) / 5173 (vite), api 3000, n8n 5678, postgres 5432 (api/postgres host ports overridable via API_HOST_PORT / POSTGRES_HOST_PORT).
