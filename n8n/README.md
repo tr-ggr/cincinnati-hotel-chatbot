@@ -153,13 +153,19 @@ fallback. Category `Other` (greetings and small talk, which never retrieve close
 
 **Suggested threshold:** keep `SCORE_GUARD = 0` and let the grounded prompt decide. The guard is only a
 safety net against hallucinated answers on far-off retrievals. If you enable it, use a loose cutoff around
-**0.70** (cosine similarity ≈ 0.30). That figure is a provisional prior for `text-embedding-3-small`, not
-calibrated yet.
+**0.75**. See the calibration below.
 
-> **TODO (blocked on `OPENAI_API_KEY`):** ingest `docs/sample/cincinnati-hotel.pdf` with the real key, run
-> `bash infra/scripts/chat-eval.sh`, and record here the `best_score` values it prints for the
-> "expected answered" and "expected unanswered" groups, and whether they separate (the script prints a
-> midpoint candidate when they do). Then confirm or replace the 0.70 suggestion.
+**Calibration (real `text-embedding-3-small`, sample PDF, 24 chunks, 2026-10-29, `chat-eval.sh`):**
+
+| Group | `best_score` values (cosine distance) |
+|---|---|
+| expected answered (6) | 0.281 · 0.341 · 0.396 · 0.438 · 0.476 · 0.591 |
+| expected unanswered (4) | 0.579 · 0.607 · 0.717 · 0.813 |
+
+The groups **do not separate**: the worst answered question ("Are pets allowed?", 0.591) is farther than the best
+unanswered one ("Does the hotel have a casino?", 0.579). A distance cutoff can't tell them apart, so
+`SCORE_GUARD` stays `0`. The grounded prompt alone scored 10/10 on `answered`. If you want a pure safety net
+against wild retrievals, `0.75` is the loosest cutoff that keeps every answerable question in this set.
 >
 > | group | best_score values (cosine distance) |
 > |---|---|

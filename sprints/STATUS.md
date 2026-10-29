@@ -19,12 +19,12 @@ Maintained by the orchestrator. One row per card. States: `todo` · `running` ·
 | S1-03 | sonnet 5.5 | passed | 1 | pdf-parse v2 works on alpine; mock upload 7 pages/42 chunks; SSE ok |
 | S1-04 | haiku 5.5 | passed | 1 | mock smoke 7/7 PASS |
 | S1 gate | — | passed | 1 | mock smoke PASS, typecheck ok |
-| S2-01 | opus 5.5 | blocked-human | 1 | import ok (4 creds, WF1 published via publish:workflow); ingest needs OPENAI_API_KEY (24 chunks expected) |
-| S2-02 | opus 5.5 | blocked-human | 1 | WF2 imported+published (3 active); verified with fake OpenAI (10/10); score = cosine DISTANCE (lower better); eval needs OPENAI_API_KEY |
-| S2-03 | sonnet 5.5 | blocked-human | 1 | WF3 imported+published; verified e2e with fake OpenAI/Resend; lead-test guard refuses empty/reviewer LEAD_TO; needs RESEND_API_KEY, EMAIL_FROM, LEAD_TO (+OPENAI) |
-| S2-04 | sonnet 5.5 | blocked-human | 1 | real client done; typecheck ok; error paths verified vs live n8n (502s, lead failed); real smoke needs keys; .env stays N8N_MOCK=1 |
+| S2-01 | opus 5.5 | passed | 2 | real ingest: 7 pages → 24 chunks (text-embedding-3-small) |
+| S2-02 | opus 5.5 | passed | 2 | real chat-eval 10/10, greeting + unknown doc ok; scores not separable → SCORE_GUARD stays 0 (README table filled) |
+| S2-03 | sonnet 5.5 | passed | 2 | real lead-test: Resend email sent to user's test inbox, LLM summary ok |
+| S2-04 | sonnet 5.5 | passed | 2 | real smoke 8/8 PASS with N8N_MOCK=0 |
 | S2-05 | haiku 5.5 | passed | 1 | 310-line README; score TODO table kept |
-| S2 gate | — | todo | 0 | |
+| S2 gate | — | passed | 1 | import exit 0, 3 active, real smoke PASS, export == repo (only ${EMAIL_FROM}/${LEAD_TO} placeholders differ) |
 | S3-01 | sonnet 5.5 | passed | 1 | lib/index + components/ui/index barrels; categories identical |
 | S3-02 | sonnet 5.5 | passed | 1 | verified live at 375px via playwright-cli; bundle 716kB (code-split idea for S4-02) |
 | S3-03 | sonnet 5.5 | passed | 1 | live check ok (Live badge, +1 within 2s, upload via UI) |
@@ -58,3 +58,5 @@ _(orchestrator appends dated one-liners here: gate results, escalations, handoff
 - 2026-10-28 user: "build, update status, commit, push; keys later". Built + committed. Push NOT done: no git remote, and the only gh account is a bee-man-dan account (user said not to use those) → push waits for S5-01 (user creates repo/remote).
 - 2026-10-28 checkpoint commit (user asked to commit everything): S2-02..05 built + verified with fake OpenAI/Resend; S4-02, S4-03, S4-H1 passed; deploy.sh written. Remaining gates (S2, S4-01, S4) need OPENAI/RESEND keys + EMAIL_FROM + LEAD_TO; S5 needs S0-06 + a non-bee-man-dan GitHub remote.
 - 2026-10-28 S4-01 part 1 (mock items) + S4-H2 passed → checkpoint commit. Remaining: S4-01 a/c, S2/S4 gates (keys), S5 (S0-06, remote, VPS).
+- 2026-10-29 keys filled by user. EMAIL_FROM was a bare domain → set to `Cincinnati Hotel Assistant <concierge@mail.tristanjamestolentino.com>` (domain verified in Resend); LEAD_TO = user's own test inbox; N8N_MOCK=0.
+- 2026-10-29 S2 gate passed (real mode) → commit 'S2: n8n workflows'.
