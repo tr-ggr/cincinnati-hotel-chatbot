@@ -1,15 +1,15 @@
 import { expect, test } from '@playwright/test';
-import { CANNED_FALLBACK, HELIPAD_Q, N8N_URL, REVIEWER_RE, isMockMode } from '../support';
+import { CANNED_FALLBACK, HELIPAD_Q, N8N_URL, isMockMode, leadEmailBlocker } from '../support';
 
 // Posts a fake lead + 2-message transcript to WF3 (hotel/lead) and checks that Resend accepted the email.
-// Safety: skipped unless LEAD_TO is set and is not a reviewer address.
+// Safety: skipped unless LEAD_TO is set, is not a reviewer address, and n8n is local (see leadEmailBlocker).
 
 test('lead webhook sends the summary email', async ({ request }) => {
   test.setTimeout(100_000);
   const leadTo = process.env.LEAD_TO ?? '';
   test.skip(await isMockMode(request), 'API is in mock mode (N8N_MOCK=1)');
   test.skip(!leadTo, 'LEAD_TO is empty in .env — set it to your own inbox and re-run pnpm n8n:import');
-  test.skip(REVIEWER_RE.test(leadTo), 'LEAD_TO contains a reviewer address — use your own inbox while testing');
+  test.skip(!!leadEmailBlocker(N8N_URL), `${leadEmailBlocker(N8N_URL)} — use your own inbox and a local stack`);
 
   const now = new Date().toISOString();
   const res = await request.post(`${N8N_URL}/webhook/hotel/lead`, {
@@ -39,7 +39,7 @@ test('long conversation: short body, full transcript attached as .md', async ({ 
   const resendKey = process.env.RESEND_API_KEY ?? '';
   test.skip(await isMockMode(request), 'API is in mock mode (N8N_MOCK=1)');
   test.skip(!leadTo, 'LEAD_TO is empty in .env — set it to your own inbox and re-run pnpm n8n:import');
-  test.skip(REVIEWER_RE.test(leadTo), 'LEAD_TO contains a reviewer address — use your own inbox while testing');
+  test.skip(!!leadEmailBlocker(N8N_URL), `${leadEmailBlocker(N8N_URL)} — use your own inbox and a local stack`);
 
   const now = new Date().toISOString();
   const sessionId = '00000000-0000-4000-8000-000000000004';

@@ -21,3 +21,16 @@ export const N8N_URL = process.env.E2E_N8N_URL ?? 'http://localhost:5678';
 
 /** Never email the reviewers from a test run (LEAD_TO comes from the root .env). */
 export const REVIEWER_RE = /tauga\.ai|deleonajiraydiego/i;
+
+const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
+
+/**
+ * Why a test must not trigger a real lead email through `target`, or '' when it may. The local .env LEAD_TO says
+ * nothing about a remote server's recipients (production emails the reviewers), so only local targets are allowed.
+ */
+export function leadEmailBlocker(target: string | undefined): string {
+  if (REVIEWER_RE.test(process.env.LEAD_TO ?? '')) return 'LEAD_TO contains a reviewer address';
+  const host = target ? new URL(target).hostname : '';
+  if (!LOCAL_HOSTS.has(host)) return `target ${host || '(none)'} is not local — its LEAD_TO may be the reviewers`;
+  return '';
+}

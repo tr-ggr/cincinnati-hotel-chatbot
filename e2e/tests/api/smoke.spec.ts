@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { expect, test } from '@playwright/test';
-import { CANNED_FALLBACK, CATEGORIES, CHECKIN_Q, HELIPAD_Q, REVIEWER_RE, SAMPLE_PDF, isMockMode } from '../support';
+import { CANNED_FALLBACK, CATEGORIES, CHECKIN_Q, HELIPAD_Q, SAMPLE_PDF, isMockMode, leadEmailBlocker } from '../support';
 
 // End-to-end HTTP contract (ARCHITECTURE §8), run against the stack through nginx.
 // Mock mode (N8N_MOCK=1) relaxes content assertions; real mode sends ONE real lead email to LEAD_TO.
@@ -89,9 +89,9 @@ test('chat: error envelope for a missing session and an empty message', async ({
   expect((await empty.json()).error.code).toBe('VALIDATION_ERROR');
 });
 
-test('lead: contact form is stored and emailed', async ({ request }) => {
+test('lead: contact form is stored and emailed', async ({ request, baseURL }) => {
   test.setTimeout(100_000);
-  test.skip(!mock && REVIEWER_RE.test(process.env.LEAD_TO ?? ''), 'LEAD_TO contains a reviewer address');
+  test.skip(!mock && !!leadEmailBlocker(baseURL), leadEmailBlocker(baseURL));
   const res = await request.post('/api/leads', {
     data: {
       sessionId,
