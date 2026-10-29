@@ -1,10 +1,20 @@
 # Run from the repo root: `docker compose up -d --build` (dev, merges compose.override.yml).
 # Deploy: `docker compose -f compose.yml --profile tunnel up -d --build`. Compose reads ./.env automatically.
+# Memory budget (4 GB VPS, whole stack < 1 GB): postgres 144m + n8n 640m + api 128m + web 16m + cloudflared 48m = 976m.
+# Node heap caps (NODE_OPTIONS / N8N_RUNNERS_MAX_OLD_SPACE_SIZE) sit below each mem_limit so V8 GCs before the OOM killer.
 name: cincinnati-hotel
 services:
   postgres:
     image: pgvector/pgvector:pg16
     restart: unless-stopped
+    mem_limit: 144m
+    command: >-
+      postgres
+      -c shared_buffers=48MB
+      -c max_connections=30
+      -c work_mem=4MB
+      -c maintenance_work_mem=32MB
+      -c effective_cache_size=128MB
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -21,6 +31,7 @@ services:
   n8n:
     image: n8nio/n8n:${N8N_VERSION}          # pinned; never :latest
     restart: unless-stopped
+    mem_limit: 640m
     depends_on:
       postgres: { condition: service_healthy }
     environment:
@@ -44,6 +55,20 @@ services:
       TZ: Asia/Manila
       N8N_DIAGNOSTICS_ENABLED: "false"
       N8N_PERSONALIZATION_ENABLED: "false"
+      N8N_VERSION_NOTIFICATIONS_ENABLED: "false"
+      N8N_TEMPLATES_ENABLED: "false"
+      # Memory: cap the main heap and the Code-node task runner (an always-on child process in internal mode).
+      NODE_OPTIONS: --max-old-space-size=320
+      N8N_RUNNERS_MAX_OLD_SPACE_SIZE: 96
+      N8N_RUNNERS_MAX_CONCURRENCY: 2
+      # Keep only failed executions, pruned after 72 h.
+      EXECUTIONS_DATA_SAVE_ON_SUCCESS: none
+      EXECUTIONS_DATA_SAVE_ON_ERROR: all
+      EXECUTIONS_DATA_SAVE_ON_PROGRESS: "false"
+      EXECUTIONS_DATA_SAVE_MANUAL_EXECUTIONS: "false"
+      EXECUTIONS_DATA_PRUNE: "true"
+      EXECUTIONS_DATA_MAX_AGE: 72
+      EXECUTIONS_DATA_PRUNE_MAX_COUNT: 1000
     volumes:
       - n8n_data:/home/node/.n8n
       - ./apps/n8n:/import:ro
@@ -56,11 +81,13 @@ services:
   api:
     build: { context: ., dockerfile: apps/api/Dockerfile }
     restart: unless-stopped
+    mem_limit: 128m
     depends_on:
       postgres: { condition: service_healthy }
       n8n: { condition: service_healthy }
     environment:
       NODE_ENV: production
+      NODE_OPTIONS: --max-old-space-size=96
       PORT: 3000
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       N8N_BASE_URL: http://n8n:5678
@@ -80,11 +107,13 @@ services:
   web:
     build: { context: ., dockerfile: apps/web/Dockerfile }
     restart: unless-stopped
+    mem_limit: 16m
     depends_on: [api]
 
   cloudflared:
     image: cloudflare/cloudflared:latest
     restart: unless-stopped
+    mem_limit: 48m
     command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
     depends_on: [web, n8n]
     profiles: ["tunnel"]

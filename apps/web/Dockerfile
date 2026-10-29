@@ -18,6 +18,8 @@ RUN pnpm --filter web build
 
 # ---- runtime ----
 FROM nginx:alpine
+# One worker is plenty for this traffic; `auto` would start one per CPU (each a few MB).
+RUN sed -i 's/^worker_processes.*/worker_processes 1;/' /etc/nginx/nginx.conf
 COPY apps/web/nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /repo/apps/web/dist /usr/share/nginx/html
 EXPOSE 80

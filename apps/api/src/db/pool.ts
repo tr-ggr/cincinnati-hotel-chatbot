@@ -7,7 +7,7 @@ export function getPool(databaseUrl?: string): pg.Pool {
   if (!pool) {
     const url = databaseUrl ?? process.env.DATABASE_URL;
     if (!url) throw new Error('DATABASE_URL is not set');
-    pool = new pg.Pool({ connectionString: url, max: 10 });
+    pool = new pg.Pool({ connectionString: url, max: 5 });
     pool.on('error', (err) => console.error('pg pool error', err));
   }
   return pool;

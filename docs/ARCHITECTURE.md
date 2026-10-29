@@ -448,6 +448,14 @@ services:
   postgres:
     image: pgvector/pgvector:pg16
     restart: unless-stopped
+    mem_limit: 144m
+    command: >-
+      postgres
+      -c shared_buffers=48MB
+      -c max_connections=30
+      -c work_mem=4MB
+      -c maintenance_work_mem=32MB
+      -c effective_cache_size=128MB
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -464,6 +472,7 @@ services:
   n8n:
     image: n8nio/n8n:${N8N_VERSION}          # pinned; never :latest
     restart: unless-stopped
+    mem_limit: 640m
     depends_on:
       postgres: { condition: service_healthy }
     environment:
@@ -487,6 +496,20 @@ services:
       TZ: Asia/Manila
       N8N_DIAGNOSTICS_ENABLED: "false"
       N8N_PERSONALIZATION_ENABLED: "false"
+      N8N_VERSION_NOTIFICATIONS_ENABLED: "false"
+      N8N_TEMPLATES_ENABLED: "false"
+      # Memory: cap the main heap and the Code-node task runner (an always-on child process in internal mode).
+      NODE_OPTIONS: --max-old-space-size=320
+      N8N_RUNNERS_MAX_OLD_SPACE_SIZE: 96
+      N8N_RUNNERS_MAX_CONCURRENCY: 2
+      # Keep only failed executions, pruned after 72 h.
+      EXECUTIONS_DATA_SAVE_ON_SUCCESS: none
+      EXECUTIONS_DATA_SAVE_ON_ERROR: all
+      EXECUTIONS_DATA_SAVE_ON_PROGRESS: "false"
+      EXECUTIONS_DATA_SAVE_MANUAL_EXECUTIONS: "false"
+      EXECUTIONS_DATA_PRUNE: "true"
+      EXECUTIONS_DATA_MAX_AGE: 72
+      EXECUTIONS_DATA_PRUNE_MAX_COUNT: 1000
     volumes:
       - n8n_data:/home/node/.n8n
       - ./apps/n8n:/import:ro
@@ -499,11 +522,13 @@ services:
   api:
     build: { context: ., dockerfile: apps/api/Dockerfile }
     restart: unless-stopped
+    mem_limit: 128m
     depends_on:
       postgres: { condition: service_healthy }
       n8n: { condition: service_healthy }
     environment:
       NODE_ENV: production
+      NODE_OPTIONS: --max-old-space-size=96
       PORT: 3000
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       N8N_BASE_URL: http://n8n:5678
@@ -523,11 +548,13 @@ services:
   web:
     build: { context: ., dockerfile: apps/web/Dockerfile }
     restart: unless-stopped
+    mem_limit: 16m
     depends_on: [api]
 
   cloudflared:
     image: cloudflare/cloudflared:latest
     restart: unless-stopped
+    mem_limit: 48m
     command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
     depends_on: [web, n8n]
     profiles: ["tunnel"]
@@ -548,6 +575,7 @@ Production: `docker compose -f compose.yml --profile tunnel up -d --build` (no o
 Compose conventions
 - Both compose files live at the repo root, which is the compose project directory, so `.env` there is read automatically. No `--env-file` or `-f` flags are needed in dev. Shell variables win over `.env` (e.g. `N8N_MOCK=1 docker compose up -d api`).
 - Dev host ports are overridable: `API_HOST_PORT` (default 3000) and `POSTGRES_HOST_PORT` (default 5432) in `.env`, for when those ports are already taken on the host. The web port 8080 and n8n port 5678 are fixed in the override.
+- Memory budget: the whole stack is capped below 1 GB for a 4 GB VPS (`mem_limit`: postgres 144m, n8n 640m, api 128m, web 16m, cloudflared 48m = 976m). Node heap caps (`NODE_OPTIONS`, `N8N_RUNNERS_MAX_OLD_SPACE_SIZE`) sit below each limit so V8 garbage-collects before the OOM killer acts. Postgres is tuned with `-c` flags, the API pool is `max: 5`, nginx runs one worker, and n8n stores only failed executions (pruned after 72 h). Check with `docker stats`; details in `docs/RUNBOOK.md`.
 - Healthchecks call `127.0.0.1`, not `localhost`. Alpine resolves `localhost` to `::1` first, and the services listen on IPv4 only, so a `localhost` check would fail.
 
 `.env.example` (mirrors the real file at the repo root; keep the two in sync)
