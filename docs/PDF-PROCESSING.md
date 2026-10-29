@@ -54,7 +54,7 @@ would leave the bot with nothing to answer from after any failed upload.
 - **Metadata:** every chunk carries `document_id` and `filename`. Retrieval and the purge both filter on
   `metadata->>'document_id'`, and the `chunks_document_id` index serves that filter.
 - **Embeddings:** `text-embedding-3-small` produces 1536-dimensional vectors, matching `vector(1536)` in
-  [`infra/db/01-schema.sql`](../infra/db/01-schema.sql). The same model embeds questions at query time, so the
+  [`migrations/01-schema.sql`](../migrations/01-schema.sql). The same model embeds questions at query time, so the
   two sides are comparable. Changing the model needs a full re-ingest (see [`../apps/n8n/README.md`](../apps/n8n/README.md#changing-the-openai-model)).
 - **Sample document:** `pnpm sample:pdf` generates `docs/sample/cincinnati-hotel.pdf`, a 7-page fictional hotel
   brochure of about 18.8k characters. The smoke test and the accuracy set are written against it.
@@ -170,7 +170,7 @@ canned sentence, and the admin dashboard counts the question as unanswered.
 
 Every user message is classified into one of eight categories by the same LLM call that writes the answer. The list
 is fixed in four places that must stay identical: `apps/api/src/lib/categories.ts`, `apps/web/src/lib/categories.ts`,
-the `CHECK` constraint in `infra/db/01-schema.sql`, and the Structured Output Parser schema in
+the `CHECK` constraint in `migrations/01-schema.sql`, and the Structured Output Parser schema in
 `apps/n8n/workflows/02-chat-answer.json`. The RUNBOOK lists the steps for adding a category.
 
 ## 6. Verifying the pipeline

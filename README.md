@@ -31,10 +31,8 @@ turbo.json              task pipeline for build / typecheck / lint / test / dev 
 apps/api                Fastify API (Vitest tests in apps/api/test)
 apps/web                React app served by nginx (Vitest tests next to src/lib)
 apps/n8n                n8n workflows, prompts, credential template, import script, workflow contract tests
-apps/e2e                Playwright end-to-end tests (HTTP smoke, browser flows, real-mode accuracy + lead email)
-infra/db                Postgres init (n8n database, schema with pgvector)
-infra/cloudflared       tunnel setup notes
-infra/scripts/deploy.sh VPS deploy
+e2e/                    Playwright end-to-end tests (HTTP smoke, browser flows, real-mode accuracy + lead email)
+migrations/             Postgres init scripts (n8n database, schema with pgvector); run on an empty volume
 docs/                   architecture, PDF pipeline, dashboard, runbook, submission notes, sample PDF
 ```
 
@@ -46,7 +44,7 @@ docs/                   architecture, PDF pipeline, dashboard, runbook, submissi
 |---|---|
 | Docker with Compose v2 (`docker compose version`) | Running the stack |
 | Node.js 22+ and pnpm 11 (`corepack enable`) | Tests, `pnpm dev`, the n8n import shortcut |
-| Git Bash on Windows (or bash on Linux/macOS), `jq`, `envsubst` (gettext) | `pnpm n8n:import` and `deploy.sh` |
+| Git Bash on Windows (or bash on Linux/macOS), `jq`, `envsubst` (gettext) | `pnpm n8n:import` |
 | OpenAI and Resend API keys | Real mode only. Mock mode needs no keys |
 
 ### 2. Configure
@@ -126,13 +124,14 @@ flows. Test another deployment with `E2E_BASE_URL=https://hotel.example.com pnpm
 the VPS `.env` so plain `docker compose` uses the production file only.
 
 ```bash
-bash infra/scripts/deploy.sh                                        # pull, build, start with the tunnel, wait healthy
-docker compose -f compose.yml --profile tunnel up -d --build        # the same, by hand
+git pull --ff-only
+docker compose -f compose.yml --profile tunnel up -d --build --wait  # build, start with the tunnel, wait healthy
 bash apps/n8n/scripts/import.sh --prod                              # first deploy, after creating the n8n owner
 docker compose -f compose.yml logs -f api
 ```
 
-The full deploy, the Cloudflare Tunnel setup and troubleshooting are in [`docs/RUNBOOK.md`](docs/RUNBOOK.md).
+The full deploy and troubleshooting are in [`docs/RUNBOOK.md`](docs/RUNBOOK.md#deploy-to-a-vps); the tunnel setup is in
+[`docs/CLOUDFLARE-TUNNEL.md`](docs/CLOUDFLARE-TUNNEL.md).
 
 ## Development with hot reload
 
@@ -153,7 +152,7 @@ The API does not read `.env` itself. Export the variables it needs first; the ex
 | `pnpm lint` | ESLint in the web app |
 | `pnpm test` | Vitest in api, web and n8n |
 | `pnpm --filter api test` | One package only (`web`, `n8n`, `e2e` work the same) |
-| `pnpm e2e` / `pnpm e2e:real` | Playwright in `apps/e2e` |
+| `pnpm e2e` / `pnpm e2e:real` | Playwright in `e2e` |
 | `pnpm n8n:import` | `apps/n8n/scripts/import.sh` (dev compose files) |
 
 ## Documentation
@@ -165,5 +164,5 @@ The API does not read `.env` itself. Export the variables it needs first; the ex
 | [`docs/ADMIN-DASHBOARD.md`](docs/ADMIN-DASHBOARD.md) | Dashboard design, what each statistic counts, and the real-time data flow with its polling fallback |
 | [`docs/RUNBOOK.md`](docs/RUNBOOK.md) | Prerequisites, environment table, local runs, n8n import, tests, VPS deploy, extending the app, troubleshooting |
 | [`apps/n8n/README.md`](apps/n8n/README.md) | Node-by-node reference for the three workflows, credentials, import and export |
-| [`sprints/README.md`](sprints/README.md) | How the build was planned: sprint cards and the status log |
+| [`docs/CLOUDFLARE-TUNNEL.md`](docs/CLOUDFLARE-TUNNEL.md) | Public access through a Cloudflare Tunnel, or ngrok |
 | [`.claude/CLAUDE.md`](.claude/CLAUDE.md) | Conventions for AI agents working in this repository |

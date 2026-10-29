@@ -1,8 +1,8 @@
 # Runbook
 
 Everything needed to run, test, deploy and extend the Cincinnati Hotel chatbot. Architecture and contracts:
-[`ARCHITECTURE.md`](ARCHITECTURE.md). Workflow reference: [`../apps/n8n/README.md`](../apps/n8n/README.md). Sprint history:
-[`../sprints/README.md`](../sprints/README.md).
+[`ARCHITECTURE.md`](ARCHITECTURE.md). Workflow reference: [`../apps/n8n/README.md`](../apps/n8n/README.md). Public access:
+[`CLOUDFLARE-TUNNEL.md`](CLOUDFLARE-TUNNEL.md).
 
 Contents: [Prerequisites](#prerequisites) · [Environment variables](#environment-variables) · [Local run, mock mode](#local-run-mock-mode) ·
 [Local run, real mode](#local-run-real-mode) · [Development without containers](#development-without-containers) ·
@@ -14,13 +14,13 @@ Contents: [Prerequisites](#prerequisites) · [Environment variables](#environmen
 | Need | Why | Notes |
 |---|---|---|
 | Docker Engine or Docker Desktop with Compose v2 | Runs postgres, n8n, api, web (and cloudflared in production) | `docker compose version` must work |
-| Git Bash on Windows (or any bash on Linux/macOS) | Runs `apps/n8n/scripts/import.sh` and `infra/scripts/deploy.sh` | On Windows use Git Bash, not PowerShell |
+| Git Bash on Windows (or any bash on Linux/macOS) | Runs `apps/n8n/scripts/import.sh` | On Windows use Git Bash, not PowerShell |
 | `jq` | Used by the n8n import and deploy scripts | Windows: put `jq.exe` on `PATH`. Debian/Ubuntu: `apt-get install jq` |
 | `envsubst` (GNU gettext) | The n8n import fills the credential template with it | Debian/Ubuntu: `apt-get install gettext-base`. Git Bash: must be on `PATH`; the script stops with a message if it is missing |
 | Node.js 22 and pnpm 11 (`corepack enable`) | `pnpm dev`, builds, typecheck, Vitest and Playwright (Turborepo runs them) | Containers use `node:22-alpine`, so Node is not needed to run the stack itself |
 | OpenAI API key | Real mode only: embeddings and chat | Not needed in mock mode |
 | Resend API key and a verified sender domain | Real mode only: lead emails | `EMAIL_FROM` must use a domain verified in Resend |
-| Cloudflare account with a domain and a tunnel | Production only | See [`infra/cloudflared/README.md`](../infra/cloudflared/README.md) |
+| Cloudflare account with a domain and a tunnel | Production only | See [`docs/CLOUDFLARE-TUNNEL.md`](CLOUDFLARE-TUNNEL.md) |
 
 Host ports used in development: **3000** (API), **5432** (Postgres), **5678** (n8n), **8080** (web), **5173** (Vite dev
 server, dev mode only).
@@ -109,7 +109,7 @@ Real mode sends embeddings and chat to OpenAI, and lead emails through Resend.
    pnpm e2e:real
    ```
 
-   On top of the HTTP and UI checks it runs the accuracy set (`apps/e2e/tests/real/chat-eval.spec.ts`): it prints
+   On top of the HTTP and UI checks it runs the accuracy set (`e2e/tests/real/chat-eval.spec.ts`): it prints
    question, expected, actual, category and `best_score` for each question, and passes when at least 9 of the 10
    `answered` flags match. The lead spec posts straight to the WF3 webhook and passes when n8n returns `ok: true` and
    an `email_id`. Both lead tests skip themselves when `LEAD_TO` is empty or contains a reviewer address.
@@ -197,13 +197,13 @@ Turborepo runs every package's scripts from the root. Two layers:
 
 | Package | What it checks |
 |---|---|
-| `apps/api/test/` | Config validation, the n8n client (mock and HTTP, error mapping), routes through `buildApp` + `app.inject()` with the DB mocked (error envelope, `NO_DOCUMENT`, contact-form flag, leads, `/internal` secret), and the category list against `apps/web` and the `infra/db/01-schema.sql` CHECK constraint |
+| `apps/api/test/` | Config validation, the n8n client (mock and HTTP, error mapping), routes through `buildApp` + `app.inject()` with the DB mocked (error envelope, `NO_DOCUMENT`, contact-form flag, leads, `/internal` secret), and the category list against `apps/web` and the `migrations/01-schema.sql` CHECK constraint |
 | `apps/web/src/lib/*.test.ts` | `api.ts` (URLs, bodies, error envelope → `ApiError`), `format.ts` |
 | `apps/n8n/test/` | Workflow JSON: fixed ids, secret-protected `hotel/*` webhooks, no inline keys, Structured Output Parser enum and Guard constants match the API, `prompts/chat-system.md` matches the prompt embedded in WF2, credential template placeholders |
 
 Run one package with `pnpm --filter api test` (or `web`, `n8n`).
 
-**End-to-end tests (Playwright, `apps/e2e`, needs the running stack)**
+**End-to-end tests (Playwright, `e2e`, needs the running stack)**
 
 | Project | Specs | Runs in |
 |---|---|---|
@@ -233,12 +233,11 @@ In real mode the smoke spec's lead step sends one email to `LEAD_TO`, and `lead.
 ## Deploy to a VPS
 
 The deploy target is a Linux VPS with Docker, behind a Cloudflare Tunnel. No inbound ports are opened and no TLS is
-configured on the VPS: the tunnel terminates HTTPS. `infra/scripts/deploy.sh` is written in sprint S5; the steps below
-are the intended flow. Check its header comment for the exact options once it exists.
+configured on the VPS: the tunnel terminates HTTPS.
 
 Before you start, create the tunnel and its two public hostnames in the Cloudflare Zero Trust dashboard
 (`hotel.<domain>` → `http://web:80`, `n8n.<domain>` → `http://n8n:5678`). Details are in
-[`infra/cloudflared/README.md`](../infra/cloudflared/README.md).
+[`docs/CLOUDFLARE-TUNNEL.md`](CLOUDFLARE-TUNNEL.md).
 
 1. **Install prerequisites on the VPS**: Docker with the Compose plugin, `git`, `jq` and `gettext-base`
    (`apt-get install -y jq gettext-base`).
@@ -250,8 +249,9 @@ Before you start, create the tunnel and its two public hostnames in the Cloudfla
    `COMPOSE_FILE=compose.yml`: the checkout contains the dev-only `compose.override.yml`, which plain `docker compose`
    would otherwise merge in (published ports, plain-HTTP n8n). With it set, every `docker compose ...` on the VPS uses
    the production file only.
-4. **Deploy**: `bash infra/scripts/deploy.sh`. It builds and starts the stack with the tunnel profile, using
-   `docker compose -f compose.yml --profile tunnel up -d --build` (no override file).
+4. **Deploy**: `docker compose -f compose.yml --profile tunnel up -d --build --wait`. This builds and starts the stack
+   with the tunnel and returns once every service is healthy (no override file). Check with
+   `docker compose -f compose.yml ps`.
 5. **Create the n8n owner account in the UI** at `https://n8n.<domain>`. The local shortcut is for dev only.
 6. **Import the workflows**: `bash apps/n8n/scripts/import.sh --prod`.
 7. **Upload the PDF** at `https://hotel.<domain>/admin` and wait for **Ready**.
@@ -261,8 +261,8 @@ Before you start, create the tunnel and its two public hostnames in the Cloudfla
 
 Afterwards, executions are visible at `https://n8n.<domain>`, and the dashboard is at `https://hotel.<domain>/admin`.
 
-Updating: pull the new commit, re-run `deploy.sh`, and re-run `n8n-import.sh --prod` if any workflow or credential
-changed. The `n8n_data` and `pgdata` volumes survive rebuilds.
+Updating: `git pull --ff-only`, re-run the step 4 command, and re-run `bash apps/n8n/scripts/import.sh --prod` if any
+workflow or credential changed. The `n8n_data` and `pgdata` volumes survive rebuilds.
 
 ## Extending
 
@@ -273,7 +273,7 @@ exactly, including `&` and spacing.
 
 1. `apps/api/src/lib/categories.ts`: add the value to `CATEGORIES`.
 2. `apps/web/src/lib/categories.ts`: the same change, so the admin chart shows it.
-3. `infra/db/01-schema.sql`: add the value to the `CHECK` on `messages.category`. This only applies to a new database.
+3. `migrations/01-schema.sql`: add the value to the `CHECK` on `messages.category`. This only applies to a new database.
    An existing database needs a migration, run once with `psql` against the `hotel` database:
 
    ```sql
@@ -337,7 +337,7 @@ diff before committing:
 | `Bind for 0.0.0.0:3000 failed` or `port is already allocated` | Something else uses the API port | Set `API_HOST_PORT` in `.env` (for example `3001`) and recreate the api container |
 | Same for `5432` | A local Postgres is running | Set `POSTGRES_HOST_PORT` (for example `5433`). Dev-mode `DATABASE_URL` must use the same port |
 | `http://localhost:8080` shows the wrong site | On Windows, another program may listen on IPv4 `:8080`, while the stack listens on `[::1]:8080` | Use `http://[::1]:8080` in the browser, and `E2E_BASE_URL='http://[::1]:8080'` for Playwright. The web port is set in `compose.override.yml`; change it there if you need a different port |
-| Compose variables are empty (`POSTGRES_USER` warnings, containers fail) | Compose was run without `--env-file .env`, so it read `infra/.env`, which does not exist | Always pass `--env-file .env` from the repo root |
+| Compose variables are empty (`POSTGRES_USER` warnings, containers fail) | Compose was run outside the repo root, so it did not find `.env` | Run `docker compose` from the repo root (or pass `--env-file /path/to/.env`) |
 | api container exits at start with `Invalid API configuration` | A required variable is empty, most often `N8N_WEBHOOK_SECRET` | The log lists the variables. Fill them in `.env` and recreate the api container |
 | A container is `unhealthy` | Healthcheck failing | `docker compose ... logs <service>`. Healthchecks use `127.0.0.1`, so a `localhost` problem is not the cause |
 | `pnpm dev` API cannot reach the database | The API does not read `.env`, or `DATABASE_URL` is wrong | Export the variables as shown in [Development without containers](#development-without-containers) |

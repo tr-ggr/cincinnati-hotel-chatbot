@@ -25,7 +25,7 @@ The admin route is code-split with `React.lazy`, so guests on `/chat` do not dow
 ## Stat definitions
 
 These are the exact queries behind the numbers. The `stats_overview` view in
-[`infra/db/01-schema.sql`](../infra/db/01-schema.sql) and `apps/api/src/lib/stats.ts` implement them.
+[`migrations/01-schema.sql`](../migrations/01-schema.sql) and `apps/api/src/lib/stats.ts` implement them.
 
 | Stat | Counts | Notes |
 |---|---|---|
@@ -114,5 +114,5 @@ The upload card and the stats share the same data path, so a replaced document a
 4. Stop the API. The badge moves to **Polling** after two reconnect attempts. The page then polls every 10 seconds,
    so once the API is back the numbers catch up on the next poll.
 
-The automated version of steps 1 and 2 is the Playwright spec `apps/e2e/tests/ui/admin-realtime.spec.ts`, which runs
+The automated version of steps 1 and 2 is the Playwright spec `e2e/tests/ui/admin-realtime.spec.ts`, which runs
 the same flow across two pages. See [`RUNBOOK.md`](RUNBOOK.md#end-to-end-tests-playwright).

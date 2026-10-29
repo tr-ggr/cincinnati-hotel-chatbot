@@ -4,7 +4,7 @@ import { defineConfig, devices } from '@playwright/test';
 // The stack must already be running: `docker compose up -d --build --wait` at the repo root.
 // The root .env supplies N8N_WEBHOOK_SECRET / LEAD_TO for the `real` project (Node's built-in loader, no dotenv).
 try {
-  process.loadEnvFile(fileURLToPath(new URL('../../.env', import.meta.url)));
+  process.loadEnvFile(fileURLToPath(new URL('../.env', import.meta.url)));
 } catch {
   // no .env: fine for the ui/api projects
 }

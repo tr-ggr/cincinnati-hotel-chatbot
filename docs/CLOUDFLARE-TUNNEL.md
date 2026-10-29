@@ -21,7 +21,7 @@ Run one ngrok agent with two tunnels (`web` -> `localhost:8080`, `n8n` -> `local
 to the ngrok n8n hostname (e.g. via an extra compose override file) and restart n8n. Do not use `--profile tunnel`.
 
 Note: `compose.yml` publishes no host ports, so ngrok on the host cannot reach `web` or `n8n` until you add a
-small override that maps them (`infra/compose.ngrok.yml`, not committed; `deploy.sh --no-tunnel` alone is not enough):
+small override that maps them (`compose.ngrok.yml`, not committed):
 
 ```yaml
 services:
@@ -31,5 +31,5 @@ services:
     ports: ["5678:5678"]
 ```
 
-Start with `docker compose -f compose.yml -f infra/compose.ngrok.yml up -d --build`.
+Start with `docker compose -f compose.yml -f compose.ngrok.yml up -d --build`.
 Alternatively, run ngrok as a compose service on the same network and point it at `web:80` and `n8n:5678`.

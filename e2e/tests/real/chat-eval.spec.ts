@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { expect, test, type APIRequestContext } from '@playwright/test';
 import { CANNED_FALLBACK, N8N_URL, SAMPLE_QUESTIONS, isMockMode } from '../support';
 
-// WF2 (hotel/chat) evaluation straight against the n8n webhook, bypassing the API (sprint card S2-02).
+// WF2 (hotel/chat) evaluation straight against the n8n webhook, bypassing the API (accuracy set, docs/sample/questions.json).
 // Prints a per-question table and the best_score distribution (cosine DISTANCE, lower = better).
 const MIN_MATCHES = 9;
 const CHAT_URL = `${N8N_URL}/webhook/hotel/chat`;

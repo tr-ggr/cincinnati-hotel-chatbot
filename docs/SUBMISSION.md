@@ -16,10 +16,10 @@ email draft at the bottom.
 Real OpenAI (`gpt-4.1-mini`, `text-embedding-3-small`) and Resend, full Docker Compose stack:
 
 - Sample PDF → 7 pages, 24 chunks. Replacing it with a second PDF purges the old chunks and file; answers switch to the new document.
-- Accuracy set (`apps/e2e/tests/real/chat-eval.spec.ts`, formerly `chat-eval.sh`) 10/10 (6 answerable, 4 unanswerable → exact fallback sentence), greeting answered as small talk.
+- Accuracy set (`e2e/tests/real/chat-eval.spec.ts`, formerly `chat-eval.sh`) 10/10 (6 answerable, 4 unanswerable → exact fallback sentence), greeting answered as small talk.
 - Edge cases grounded: follow-up ("How much is that?"), multi-part question, Spanish question (answered in Spanish), cross-chunk
   arithmetic (price difference between two rooms).
-- HTTP smoke (`apps/e2e/tests/api/smoke.spec.ts`, formerly `smoke.sh`) 3× in a row PASS (upload, chat, unanswered → contact form, lead email sent, stats, SSE).
+- HTTP smoke (`e2e/tests/api/smoke.spec.ts`, formerly `smoke.sh`) 3× in a row PASS (upload, chat, unanswered → contact form, lead email sent, stats, SSE).
 - `pnpm typecheck && pnpm build && pnpm test` green; no unhandled/FATAL lines and no secrets in the API logs.
 
 ## n8n reviewer access

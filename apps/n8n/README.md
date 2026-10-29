@@ -259,7 +259,7 @@ Before you commit:
   `02-chat-answer.json` and `03-lead-email.json`, or change it in the UI and re-export. Re-run the chat eval
   afterwards (`pnpm e2e:real`), because the category and `answered` behaviour depends on the model.
 - **Embedding model (WF1 and WF2).** Change `model` in `Embeddings OpenAI`. **Dimensions must stay 1536** to match
-  `vector(1536)` in `infra/db/01-schema.sql`. Otherwise the schema has to change too. Any model change also needs a
+  `vector(1536)` in `migrations/01-schema.sql`. Otherwise the schema has to change too. Any model change also needs a
   **full re-ingest** of the document, because existing vectors are not comparable to the new model's vectors.
 - Do not switch WF2's chat model to the Responses API. `responsesApiEnabled: false` is deliberate there.
 
@@ -297,11 +297,11 @@ Also update the API if the response id field changes, and rerun `pnpm e2e:real` 
   constants match `apps/api/src/lib/categories.ts`, the WF2 prompt matches `prompts/chat-system.md` (the sync check
   above, automated), `03-*` keeps the `${EMAIL_FROM}` / `${LEAD_TO}` placeholders, and every credential a node
   references exists in `credentials.template.json`.
-- `pnpm e2e:real` runs `apps/e2e/tests/real/chat-eval.spec.ts`, which posts `docs/sample/questions.json` straight to the
+- `pnpm e2e:real` runs `e2e/tests/real/chat-eval.spec.ts`, which posts `docs/sample/questions.json` straight to the
   WF2 webhook. It prints question, expected, actual, category and `best_score` as a table, then asserts at least 9 of
   10 answered flags match, that `hi there!` gives `answered=true` with `Other`, and that a random `document_id` gives
   the canned sentence. It is skipped when the API runs in mock mode.
-- The same run includes `apps/e2e/tests/real/lead.spec.ts`, which posts a fake lead to WF3. It is skipped when
+- The same run includes `e2e/tests/real/lead.spec.ts`, which posts a fake lead to WF3. It is skipped when
   `LEAD_TO` is empty or contains a reviewer address, and passes when the response has `ok: true` and a non-empty
   `email_id`.
 

@@ -1,6 +1,6 @@
 # Architecture — Cincinnati Hotel Chatbot
 
-> Source of truth for the build. Sprint cards in `sprints/` reference sections of this file by number (§).
+> Source of truth for the build. Other docs reference sections of this file by number (§).
 > S4-03 refines this document (adds a Mermaid diagram, prose) but must not change contracts without updating code.
 
 ## At a glance
@@ -118,21 +118,17 @@ TaugaAI/
 │           ├── components/chat/      # MessageList, MessageBubble, Composer, TypingIndicator, ContactFormCard, SuggestionChips
 │           ├── components/admin/     # UploadCard, StatCard, CategoryChart, LiveBadge
 │           └── pages/                # Landing.tsx, Chat.tsx, Admin.tsx, NotFound.tsx
-│   ├── n8n/                          # workspace package (no build); mounted read-only into the n8n container at /import
-│   │   ├── README.md                 # node-by-node explanation, credentials, import/export
-│   │   ├── workflows/01-ingest-pdf.json  02-chat-answer.json  03-lead-email.json
-│   │   ├── prompts/chat-system.md  lead-summary.md
-│   │   ├── credentials.template.json # ${VAR} placeholders; never commit a filled copy
-│   │   ├── scripts/import.sh         # `pnpm n8n:import`: credentials + workflows → n8n, publish, verify
-│   │   └── test/workflows.test.ts    # Vitest contract checks on the workflow JSON
-│   └── e2e/                          # Playwright: tests/api (HTTP smoke), tests/ui (browser), tests/real (n8n + OpenAI + Resend)
-├── infra/
-│   ├── db/00-create-n8n-db.sh  01-schema.sql
-│   ├── cloudflared/README.md
-│   └── scripts/deploy.sh
-├── docs/  ARCHITECTURE.md  PDF-PROCESSING.md  ADMIN-DASHBOARD.md  RUNBOOK.md  SUBMISSION.md
-│          screenshots/  sample/{generate-sample-pdf.ts, cincinnati-hotel.pdf, questions.json}
-└── sprints/  README.md  STATUS.md  S0..S5-*.md
+│   └── n8n/                          # workspace package (no build); mounted read-only into the n8n container at /import
+│       ├── README.md                 # node-by-node explanation, credentials, import/export
+│       ├── workflows/01-ingest-pdf.json  02-chat-answer.json  03-lead-email.json
+│       ├── prompts/chat-system.md  lead-summary.md
+│       ├── credentials.template.json # ${VAR} placeholders; never commit a filled copy
+│       ├── scripts/import.sh         # `pnpm n8n:import`: credentials + workflows → n8n, publish, verify
+│       └── test/workflows.test.ts    # Vitest contract checks on the workflow JSON
+├── e2e/                              # Playwright: tests/api (HTTP smoke), tests/ui (browser), tests/real (n8n + OpenAI + Resend)
+├── migrations/00-create-n8n-db.sh  01-schema.sql   # Postgres init, mounted at /docker-entrypoint-initdb.d
+└── docs/  ARCHITECTURE.md  PDF-PROCESSING.md  ADMIN-DASHBOARD.md  RUNBOOK.md  SUBMISSION.md  CLOUDFLARE-TUNNEL.md
+           sample/{generate-sample-pdf.ts, cincinnati-hotel.pdf, questions.json}
 ```
 
 Packages
@@ -141,9 +137,9 @@ Packages
 - tests: `vitest` (api, web, n8n), `@playwright/test` (e2e).
 - root dev: `turbo`, `pdfkit`, `@types/pdfkit`, `tsx`.
 
-Root `package.json` scripts run through Turborepo (`turbo.json`, `envMode: loose` so `pnpm dev` sees exported env): `dev`, `build`, `typecheck`, `lint`, `test` (Vitest in every package), `e2e` / `e2e:real` (Playwright in `apps/e2e`), `n8n:import`, `sample:pdf` (`tsx docs/sample/generate-sample-pdf.ts`).
+Root `package.json` scripts run through Turborepo (`turbo.json`, `envMode: loose` so `pnpm dev` sees exported env): `dev`, `build`, `typecheck`, `lint`, `test` (Vitest in every package), `e2e` / `e2e:real` (Playwright in `e2e`), `n8n:import`, `sample:pdf` (`tsx docs/sample/generate-sample-pdf.ts`).
 
-## §3 Postgres schema — `infra/db/01-schema.sql`
+## §3 Postgres schema — `migrations/01-schema.sql`
 
 ```sql
 CREATE EXTENSION IF NOT EXISTS vector;
@@ -221,7 +217,7 @@ SELECT
 ```
 
 Notes
-- `infra/db/00-create-n8n-db.sh` runs first and creates database `n8n` (n8n's own metadata DB) in the same Postgres instance. The app DB is `hotel` (`POSTGRES_DB`) and holds everything above including `chunks`.
+- `migrations/00-create-n8n-db.sh` runs first and creates database `n8n` (n8n's own metadata DB) in the same Postgres instance. The app DB is `hotel` (`POSTGRES_DB`) and holds everything above including `chunks`.
 - "Total chat sessions" = sessions with ≥ 1 user message (opening the chat page without asking doesn't count). Documented in `docs/ADMIN-DASHBOARD.md`.
 - The single `POSTGRES_USER` is a superuser; n8n's own `CREATE EXTENSION IF NOT EXISTS` calls no-op safely.
 
@@ -458,7 +454,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}            # hotel
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./infra/db:/docker-entrypoint-initdb.d:ro
+      - ./migrations:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
@@ -547,7 +543,7 @@ volumes:
 - ports: postgres `${POSTGRES_HOST_PORT:-5432}:5432`, n8n `5678:5678`, api `${API_HOST_PORT:-3000}:3000`, web `8080:80`
 - n8n env: `N8N_PROTOCOL=http`, `N8N_HOST=localhost`, `N8N_WEBHOOK_URL=http://localhost:5678/`, `N8N_EDITOR_BASE_URL=http://localhost:5678/`, `N8N_SECURE_COOKIE=false`
 
-Production: `docker compose -f compose.yml --profile tunnel up -d --build` (no override file; see `infra/cloudflared/README.md`).
+Production: `docker compose -f compose.yml --profile tunnel up -d --build` (no override file; see `docs/CLOUDFLARE-TUNNEL.md`).
 
 Compose conventions
 - Both compose files live at the repo root, which is the compose project directory, so `.env` there is read automatically. No `--env-file` or `-f` flags are needed in dev. Shell variables win over `.env` (e.g. `N8N_MOCK=1 docker compose up -d api`).
@@ -587,14 +583,14 @@ POSTGRES_HOST_PORT=5432
 
 Local dev without containers for api/web: `docker compose up -d postgres n8n`, then `pnpm dev`. The API does not read `.env` itself, so export the variables first, with `DATABASE_URL=postgres://hotel:…@localhost:5432/hotel` (or the `POSTGRES_HOST_PORT` you set), `N8N_BASE_URL=http://localhost:5678`, `INTERNAL_BASE_URL=http://host.docker.internal:3000` (so n8n in Docker can reach the host API), and the `N8N_WEBHOOK_SECRET` from `.env`. The step-by-step version is in `docs/RUNBOOK.md`.
 
-ngrok alternative (`infra/cloudflared/README.md`): one ngrok agent with two tunnels (`web` → 8080, `n8n` → 5678) or two `ngrok http` processes; set `N8N_HOST` / `N8N_WEBHOOK_URL` / `N8N_EDITOR_BASE_URL` to the ngrok n8n hostname.
+ngrok alternative (`docs/CLOUDFLARE-TUNNEL.md`): one ngrok agent with two tunnels (`web` → 8080, `n8n` → 5678) or two `ngrok http` processes; set `N8N_HOST` / `N8N_WEBHOOK_URL` / `N8N_EDITOR_BASE_URL` to the ngrok n8n hostname.
 
 ## §8 Verification
 
 1. **Local full stack**: `docker compose up -d --build`. First run: open `http://localhost:5678`, create the owner account, run `pnpm n8n:import`. Step-by-step in `docs/RUNBOOK.md`.
 2. **Seed**: `pnpm sample:pdf` (already committed) → upload via `http://localhost:8080/admin` or `curl -F file=@docs/sample/cincinnati-hotel.pdf localhost:8080/api/admin/document`.
 0. **Unit / contract** `pnpm test` (Vitest, no stack): API routes with a mocked DB, n8n client, category parity across API / web / SQL / WF2, workflow JSON + prompt sync.
-3. **HTTP smoke** `apps/e2e/tests/api/smoke.spec.ts` (`pnpm e2e`, or `pnpm e2e:real` with the `real` project):
+3. **HTTP smoke** `e2e/tests/api/smoke.spec.ts` (`pnpm e2e`, or `pnpm e2e:real` with the `real` project):
    - upload → `status=ready`, `chunkCount > 10` (mock: 42)
    - `POST /api/sessions` → id
    - "What time is check-in?" → `answered=true`, content contains "3", category ∈ {Pricing & Booking, Policies}
@@ -602,8 +598,8 @@ ngrok alternative (`infra/cloudflared/README.md`): one ngrok agent with two tunn
    - `POST /api/leads` → 201, `emailStatus=sent` (mock: sent)
    - `GET /api/admin/stats` → totals incremented, byCategory contains the category above
    - `GET /api/admin/stats/stream` → `text/event-stream` with `: ping` and `event: stats`
-4. **Accuracy set** `docs/sample/questions.json` (6 answerable + 4 unanswerable): ≥ 9/10 correct `answered` (S2-02, S4-01) — `apps/e2e/tests/real/chat-eval.spec.ts`.
-5. **Browser** `apps/e2e/tests/ui/`: user journey (mock) + admin realtime across two pages.
+4. **Accuracy set** `docs/sample/questions.json` (6 answerable + 4 unanswerable): ≥ 9/10 correct `answered` (S2-02, S4-01) — `e2e/tests/real/chat-eval.spec.ts`.
+5. **Browser** `e2e/tests/ui/`: user journey (mock) + admin realtime across two pages.
 6. **Public**: `E2E_BASE_URL=https://hotel.<domain> pnpm e2e`; confirm n8n executions visible at `https://n8n.<domain>`.
 
 ## §9 Risks

@@ -22,7 +22,7 @@ describe('categories', () => {
   });
 
   it('matches the messages.category CHECK constraint', () => {
-    const sql = readFileSync(new URL('../../../infra/db/01-schema.sql', import.meta.url), 'utf8');
+    const sql = readFileSync(new URL('../../../migrations/01-schema.sql', import.meta.url), 'utf8');
     const check = /category\s+text CHECK \(category IN \(([^)]*)\)\)/.exec(sql)?.[1];
     expect(check, 'CHECK constraint not found').toBeDefined();
     const values = [...check!.matchAll(/'([^']+)'/g)].map((m) => m[1]);
