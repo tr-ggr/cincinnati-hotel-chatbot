@@ -30,12 +30,12 @@ Maintained by the orchestrator. One row per card. States: `todo` · `running` ·
 | S3-03 | sonnet 5.5 | passed | 1 | live check ok (Live badge, +1 within 2s, upload via UI) |
 | S3-04 | haiku 5.5 | passed | 1 | 2/2 specs pass (E2E_BASE_URL=http://[::1]:8080) |
 | S3 gate | — | passed | 1 | e2e 2/2, no console errors, 375+1280px ok, admin 4 cards+chart+Live |
-| S4-01 | opus 5.5 | blocked-human | 1 | part 1 done (b,d,e,f,g,h verified mock: SSE 10ms, ping 20s, reconnect ok, 409 ok, concurrency ok, rate-limit 60/10, reqIds, redaction, shutdown 0.55s); a,c need keys |
+| S4-01 | opus 5.5 | passed | 2 | b,d–h (mock, attempt 1); a: greeting/thanks/follow-up/multi-part/Spanish/cross-chunk all grounded, no prompt change; c: replace → old chunks+file purged, 1 active doc, answers switch; smoke 3×, chat-eval 10/10 |
 | S4-02 | sonnet 5.5 | passed | 1 | route code-split (no chunk warning), AA accent #b45309, e2e 2/2, 375/1280 ok |
 | S4-03 | haiku 5.5 | passed | 1 | 4 docs + README; links ok; mermaid added |
 | S4-H1 | haiku 5.5 | passed | 1 | CLAUDE.md --env-file; .env.example comments; 502 emits stats; Dockerfile 127.0.0.1; ngrok note |
 | S4-H2 | sonnet 5.5 | passed | 1 | ARCH §4 rate-limit text; nginx X-Request-ID; SSE recovers from polling (Live 8s after api restart); friendly 429 in chat |
-| S4 gate | — | todo | 0 | |
+| S4 gate | — | passed | 1 | real smoke 3× PASS, typecheck+build ok, docs ok, unhandled/FATAL=0, no secrets in logs |
 | S5-01 | human | todo | 0 | |
 | S5-02 | opus 5.5 + human | blocked-human | 1 | deploy.sh written (bash -n ok, preflight dry-runs ok); VPS deploy waits on S0-06 + S5-01 + keys |
 | S5-03 | haiku 5.5 | todo | 0 | |
@@ -60,3 +60,4 @@ _(orchestrator appends dated one-liners here: gate results, escalations, handoff
 - 2026-10-28 S4-01 part 1 (mock items) + S4-H2 passed → checkpoint commit. Remaining: S4-01 a/c, S2/S4 gates (keys), S5 (S0-06, remote, VPS).
 - 2026-10-29 keys filled by user. EMAIL_FROM was a bare domain → set to `Cincinnati Hotel Assistant <concierge@mail.tristanjamestolentino.com>` (domain verified in Resend); LEAD_TO = user's own test inbox; N8N_MOCK=0.
 - 2026-10-29 S2 gate passed (real mode) → commit 'S2: n8n workflows'.
+- 2026-10-29 S4 gate passed (real mode) → commit 'S4: polish + docs'. No push: still no git remote (S5-01).
