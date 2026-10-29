@@ -7,7 +7,7 @@ email draft at the bottom.
 |---|---|
 | Live app | `https://⟨PUBLIC_WEB_HOST⟩` (landing `/` → Regular User `/chat`, Admin `/admin`) |
 | n8n editor | `https://⟨N8N_HOST⟩` |
-| Repository | `⟨REPO_URL⟩` (e.g. `https://github.com/<owner>/<repo>`) |
+| Repository | https://github.com/tr-ggr/cincinnati-hotel-chatbot (private — make public or invite reviewers before sending) |
 | Workflows (JSON) | [`n8n/workflows/`](../n8n/workflows/) — `01-ingest-pdf.json`, `02-chat-answer.json`, `03-lead-email.json` |
 | Docs | [ARCHITECTURE](ARCHITECTURE.md) · [PDF-PROCESSING](PDF-PROCESSING.md) · [ADMIN-DASHBOARD](ADMIN-DASHBOARD.md) · [RUNBOOK](RUNBOOK.md) |
 
@@ -73,7 +73,7 @@ the email. The exported workflow JSON in `n8n/workflows/` is identical to what i
 > Here is my submission for the Cincinnati Hotel chatbot entrance task.
 >
 > - **Live app:** https://⟨PUBLIC_WEB_HOST⟩ — pick "Regular User" to chat or "Admin" to upload the PDF and watch the live stats.
-> - **Repository:** ⟨REPO_URL⟩ (you have been invited / the repo is public).
+> - **Repository:** https://github.com/tr-ggr/cincinnati-hotel-chatbot (you have been invited / the repo is public).
 > - **n8n:** https://⟨N8N_HOST⟩ — you should have an invite from n8n; otherwise the workflow screenshots are attached and the exported
 >   JSON is in `n8n/workflows/`.
 >
