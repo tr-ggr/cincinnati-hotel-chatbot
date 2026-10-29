@@ -7,17 +7,22 @@ export interface BadgeProps extends HTMLAttributes<HTMLSpanElement> {
   tone?: BadgeTone;
 }
 
+// Status flaps: reversed plates in board lettering.
 const tones: Record<BadgeTone, string> = {
-  neutral: 'bg-sunken text-ink-soft',
-  accent: 'bg-accent-soft text-accent-ink',
-  success: 'bg-emerald-100 text-emerald-800',
-  danger: 'bg-red-100 text-red-800',
+  neutral: 'bg-rule-strong text-flap',
+  accent: 'bg-signal text-board',
+  success: 'bg-go text-board',
+  danger: 'bg-stop text-board',
 };
 
 export function Badge({ tone = 'neutral', className, ...rest }: BadgeProps) {
   return (
     <span
-      className={cn('inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium', tones[tone], className)}
+      className={cn(
+        'inline-flex h-6 items-center gap-1 rounded-[2px] px-2 font-display text-sm font-extrabold uppercase tracking-wider',
+        tones[tone],
+        className,
+      )}
       {...rest}
     />
   );

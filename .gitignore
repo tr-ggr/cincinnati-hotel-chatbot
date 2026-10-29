@@ -13,3 +13,4 @@ test-results/
 *.log
 .turbo/
 .playwright-cli/
+.impeccable/review/

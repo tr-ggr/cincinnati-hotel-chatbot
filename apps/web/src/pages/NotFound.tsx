@@ -1,19 +1,23 @@
 import { Link } from 'react-router';
-import { Compass } from 'lucide-react';
+import { ArrowLeft } from 'lucide-react';
+import { FlapText } from '../components/ui';
+import { useDocumentTitle } from '../lib';
 
 export default function NotFound() {
+  useDocumentTitle('Page not found');
   return (
-    <main className="mx-auto flex min-h-dvh max-w-[720px] flex-col items-center justify-center gap-3 px-4 py-16 text-center">
-      <span className="flex size-14 items-center justify-center rounded-2xl bg-accent-soft text-accent-ink" aria-hidden="true">
-        <Compass className="size-7" />
-      </span>
-      <p className="mt-2 text-sm font-semibold tracking-widest text-accent">404</p>
-      <h1 className="text-2xl font-semibold tracking-tight text-ink sm:text-3xl">Page not found</h1>
-      <p className="max-w-sm text-sm text-muted">The page you are looking for does not exist or may have moved.</p>
+    <main className="mx-auto flex min-h-dvh max-w-[720px] flex-col items-start justify-center px-4 py-16 sm:px-8">
+      <h1>
+        <FlapText text="Page not found" animateOnMount className="text-[clamp(1.75rem,7vw,3.5rem)]" />
+      </h1>
+      <p className="mt-5 max-w-md text-base text-dim">
+        There is no service to this page. It may have moved, or the address has a typo.
+      </p>
       <Link
         to="/"
-        className="mt-3 inline-flex h-10 items-center rounded-xl bg-accent px-4 text-sm font-medium text-white shadow-sm transition-colors hover:bg-accent-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+        className="mt-8 inline-flex h-11 items-center gap-2 rounded-slat bg-signal px-4 text-sm font-bold uppercase tracking-wider text-board transition-colors hover:bg-signal-hover"
       >
+        <ArrowLeft className="size-4" aria-hidden="true" />
         Back to home
       </Link>
     </main>

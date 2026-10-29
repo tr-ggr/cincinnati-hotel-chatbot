@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="theme-color" content="#b45309" />
+    <meta name="theme-color" content="#101215" />
     <meta
       name="description"
       content="Ask the Cincinnati Hotel virtual concierge about rooms, dining, amenities and policies. Answers come only from the hotel's own information."
@@ -15,9 +15,29 @@
       property="og:description"
       content="A virtual concierge that answers questions about the hotel from its official information."
     />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Next:wght@400;500;600;700&family=Big+Shoulders+Display:wght@800&display=swap"
+    />
     <title>Cincinnati Hotel Assistant</title>
   </head>
   <body>
+    <!--
+      THESIS: The hotel runs like Union Terminal's concourse: roles, statuses and statistics are posted on a
+      split-flap departures board. Refuses the white chat column with a rounded-card dashboard.
+      OWN-WORLD: Slat-black board (#101215 → #1f2328 ladder), ivory flap lettering, signal-amber plates as the one
+      action colour, green/red status flaps, hairline-ruled cells. Big Shoulders Display on slats, Atkinson
+      Hyperlegible Next for prose. Assistant answers arrive as ivory enquiry slips.
+      STORY: Guests see a station-grade concierge that answers only from the hotel guide; admins watch the board
+      flip as questions arrive, which proves real time without a badge.
+      FIRST VIEWPORT: Landing: CINCINNATI HOTEL flap header across the board with a flap clock, two board rows
+      (Concierge, Hotel office), each with destination copy, a status flap, and a signal plate reading
+      "Regular User" / "Admin" on the right.
+      FORM: Union Terminal split-flap departures board, #5 of 7 grounded candidates, seed 8039c1f3.
+      FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, DESIGN.md, and every shipping raster carrying its provenance
+    -->
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

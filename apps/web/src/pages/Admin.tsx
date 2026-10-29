@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link } from 'react-router';
-import { ArrowLeft, CircleAlert, Mail, MessageSquare, Users } from 'lucide-react';
-import { getDocument, useStatsStream, type DocumentInfo } from '../lib';
-import { CategoryChart, LiveBadge, StatCard, UploadCard } from '../components/admin';
+import { getDocument, useDocumentTitle, useStatsStream, type DocumentInfo } from '../lib';
+import { CategoryChart, StatCard, UploadCard } from '../components/admin';
+import { BackLink, FlapText } from '../components/ui';
 
 export default function Admin() {
+  useDocumentTitle('Admin');
   const { stats, mode, error, refresh } = useStatsStream();
   const [doc, setDoc] = useState<DocumentInfo | null | undefined>(undefined);
 
@@ -29,42 +29,49 @@ export default function Admin() {
     await Promise.all([refreshDoc(), refresh()]);
   }, [refreshDoc, refresh]);
 
-  const answerRate =
+  const unansweredShare =
     stats && stats.totalQuestions > 0
-      ? `Answer rate ${Math.round(((stats.totalQuestions - stats.unansweredQuestions) / stats.totalQuestions) * 100)}%`
+      ? `${Math.round((stats.unansweredQuestions / stats.totalQuestions) * 100)}% of questions`
       : undefined;
 
   return (
-    <main className="mx-auto w-full max-w-[1100px] px-4 py-6 sm:py-10">
-      <header className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
-        <div className="min-w-0">
-          <Link
-            to="/"
-            className="inline-flex items-center gap-1 text-sm text-muted hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-          >
-            <ArrowLeft className="size-4" aria-hidden="true" /> Home
-          </Link>
-          <h1 className="mt-1 text-2xl font-semibold tracking-tight text-ink sm:text-3xl">Admin dashboard</h1>
+    <main className="mx-auto w-full max-w-[1180px] px-4 py-6 sm:px-8 sm:py-10">
+      <header className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3 border-b-2 border-rule-strong pb-5">
+        <div className="flex min-w-0 items-center gap-4">
+          <BackLink />
+          <div className="min-w-0">
+            <h1>
+              <FlapText text="Admin dashboard" className="text-[1.5rem] sm:text-[2rem]" />
+            </h1>
+            <p className="mt-1.5 text-sm text-dim">Cincinnati Hotel · guest questions as they arrive</p>
+          </div>
         </div>
-        <LiveBadge mode={mode} />
+        {mode === 'polling' && (
+          <p role="status" className="text-sm text-dim">
+            Live updates paused, refreshing every 10&nbsp;s
+          </p>
+        )}
       </header>
 
       {error && !stats && (
-        <p role="alert" className="mt-4 rounded-xl bg-red-50 p-3 text-sm text-red-800">
+        <p role="alert" className="mt-5 rounded-slat border border-stop/50 bg-stop/10 p-3 text-sm text-stop">
           Could not load stats: {error.message}
         </p>
       )}
 
-      <section aria-label="Key numbers" className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Total sessions" value={stats?.totalSessions ?? null} icon={Users} />
-        <StatCard label="Questions asked" value={stats?.totalQuestions ?? null} icon={MessageSquare} />
-        <StatCard label="Unanswered" value={stats?.unansweredQuestions ?? null} icon={CircleAlert} sublabel={answerRate} />
-        <StatCard label="Leads captured" value={stats?.totalLeads ?? null} icon={Mail} />
+      <section
+        aria-label="Key numbers"
+        className="mt-6 grid grid-cols-2 gap-px overflow-hidden rounded-slat border border-rule bg-rule lg:grid-cols-4"
+      >
+        <StatCard label="Total sessions" value={stats?.totalSessions ?? null} />
+        <StatCard label="Questions asked" value={stats?.totalQuestions ?? null} />
+        <StatCard label="Unanswered" value={stats?.unansweredQuestions ?? null} sublabel={unansweredShare} />
+        <StatCard label="Leads captured" value={stats?.totalLeads ?? null} />
       </section>
 
-      <div className="mt-4 grid grid-cols-1 items-start gap-4 lg:grid-cols-2">
-        <UploadCard document={doc} onUploaded={onUploaded} />
+      <div className="mt-6 grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)]">
         <CategoryChart data={stats?.byCategory ?? null} totalQuestions={stats?.totalQuestions ?? 0} />
+        <UploadCard document={doc} onUploaded={onUploaded} />
       </div>
     </main>
   );

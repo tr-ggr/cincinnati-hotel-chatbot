@@ -11,7 +11,7 @@ export function Textarea({ invalid, className, rows = 3, ...rest }: TextareaProp
     <textarea
       rows={rows}
       aria-invalid={invalid || undefined}
-      className={cn(fieldClasses, 'resize-none py-2.5', invalid && 'border-red-500', className)}
+      className={cn(fieldClasses, 'resize-none py-2.5', invalid && 'border-stop', className)}
       {...rest}
     />
   );

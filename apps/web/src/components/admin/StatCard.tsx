@@ -1,32 +1,30 @@
-import type { ComponentType } from 'react';
-import type { LucideProps } from 'lucide-react';
-import { Card, Skeleton } from '../ui';
+import { FlapText, Skeleton } from '../ui';
+import { useChangeTick } from './useChangeTick';
 
 export interface StatCardProps {
   label: string;
   value: number | null;
-  icon: ComponentType<LucideProps>;
   sublabel?: string;
 }
 
-export function StatCard({ label, value, icon: Icon, sublabel }: StatCardProps) {
+/** One cell of the stat strip. The value is set in flap digits and lights up when a new snapshot changes it. */
+export function StatCard({ label, value, sublabel }: StatCardProps) {
+  const tick = useChangeTick(value);
   return (
-    <Card className="flex items-start gap-4">
-      <span className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-accent-soft text-accent-ink">
-        <Icon className="size-5" aria-hidden="true" />
-      </span>
-      <div className="min-w-0 flex-1">
-        <p className="text-sm text-muted">{label}</p>
-        {value === null ? (
-          <>
-            <Skeleton className="mt-1.5 h-8 w-16" />
-            <span className="sr-only">Loading</span>
-          </>
-        ) : (
-          <p className="mt-0.5 text-3xl font-semibold tabular-nums text-ink">{value.toLocaleString()}</p>
-        )}
-        {sublabel && value !== null && <p className="mt-0.5 text-xs text-muted">{sublabel}</p>}
-      </div>
-    </Card>
+    <div className="relative flex min-w-0 flex-col gap-3 bg-slat p-4 sm:p-5">
+      {tick > 0 && <span key={tick} className="animate-row-lit pointer-events-none absolute inset-0" />}
+      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted">{label}</p>
+      {value === null ? (
+        <>
+          <Skeleton className="h-10 w-24" />
+          <span className="sr-only">Loading</span>
+        </>
+      ) : (
+        <p className="tabular-nums">
+          <FlapText text={value.toLocaleString()} a11y="inline" minCells={3} className="text-[2rem] sm:text-[2.5rem]" />
+        </p>
+      )}
+      <p className="min-h-5 text-sm text-dim">{value !== null ? sublabel : null}</p>
+    </div>
   );
 }

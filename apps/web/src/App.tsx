@@ -4,7 +4,7 @@ import { Spinner } from './components/ui';
 import Landing from './pages/Landing';
 import NotFound from './pages/NotFound';
 
-// Heavy routes are split out: Chat pulls react-markdown, Admin pulls recharts.
+// Routes are split out: Chat pulls react-markdown.
 const Chat = lazy(() => import('./pages/Chat'));
 const Admin = lazy(() => import('./pages/Admin'));
 

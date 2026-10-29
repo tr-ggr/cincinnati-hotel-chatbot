@@ -4,3 +4,4 @@ export * from './cn';
 export * from './format';
 export * from './suggestions';
 export * from './useStatsStream';
+export * from './useDocumentTitle';

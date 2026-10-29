@@ -1,32 +1,34 @@
 @import "tailwindcss";
 
-/* Design tokens: warm stone neutrals with an amber accent.
-   Tailwind v4 generates utilities from these (bg-page, text-ink, bg-accent, ...). */
+/* Union Terminal departures board.
+   Neutrals come only from the slat ladder (board → slat → slat-2 → rule → rule-strong → muted → dim → flap).
+   Signal amber is the board's lettering and the one action colour; go / stop are status flaps.
+   Slip is the printed enquiry slip the concierge hands back (assistant answers). */
 @theme {
-  --color-page: #fafaf9;          /* stone-50  */
-  --color-surface: #ffffff;
-  --color-sunken: #f5f5f4;        /* stone-100 */
-  --color-line: #e7e5e4;          /* stone-200 */
-  --color-muted: #78716c;         /* stone-500 */
-  --color-ink: #1c1917;           /* stone-900 */
-  --color-ink-soft: #44403c;      /* stone-700 */
-  --color-accent: #b45309;        /* amber-700: white text 5.0:1 (AA) */
-  --color-accent-hover: #92400e;  /* amber-800 */
-  --color-accent-soft: #fef3c7;   /* amber-100 */
-  --color-accent-ink: #78350f;    /* amber-900: text on light/amber-soft */
+  --color-board: #101215;
+  --color-slat: #171a1e;
+  --color-slat-2: #1f2328;
+  --color-rule: #2b3037;
+  --color-rule-strong: #3b414a;
+  --color-muted: #858e99;    /* 5.6:1 on board */
+  --color-dim: #a7aeb7;      /* 8.4:1 on board */
+  --color-flap: #ece7da;     /* 15:1 on board */
 
-  --radius-card: 1rem;
-  --radius-control: 0.75rem;
-  --shadow-card: 0 1px 2px rgb(28 25 23 / 0.05), 0 1px 3px rgb(28 25 23 / 0.06);
-  --shadow-pop: 0 8px 24px rgb(28 25 23 / 0.08);
-  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-}
+  --color-signal: #f0b429;   /* ink on signal 10:1 */
+  --color-signal-hover: #f7c650;
+  --color-go: #4fb07a;
+  --color-stop: #e8674f;
 
-:root {
-  color-scheme: light;
-  --page: #fafaf9;
-  --ink: #1c1917;
-  --accent: #b45309;
+  --color-slip: #efe9dc;
+  --color-slip-ink: #16181b;
+  --color-slip-muted: #5c5a55;
+  --color-slip-rule: #d6cfbf;
+
+  --radius-slat: 3px;
+  --font-display: "Big Shoulders Display", "Arial Narrow", sans-serif;
+  --font-sans: "Atkinson Hyperlegible Next", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+
+  --animate-flap: flap 180ms cubic-bezier(0.3, 0, 0.2, 1) both;
 }
 
 @layer base {
@@ -37,23 +39,82 @@
   }
 
   html {
-    scroll-behavior: smooth;
+    color-scheme: dark;
+    scrollbar-color: var(--color-rule-strong) var(--color-board);
   }
 
   body {
     margin: 0;
-    background-color: var(--color-page);
-    color: var(--color-ink);
-    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    background-color: var(--color-board);
+    color: var(--color-flap);
+    font-family: var(--font-sans);
+    caret-color: var(--color-signal);
     -webkit-font-smoothing: antialiased;
+  }
+
+  ::selection {
+    background: var(--color-signal);
+    color: var(--color-board);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-signal);
+    outline-offset: 2px;
   }
 }
 
-/* Subtle entrance for new chat bubbles. */
-@keyframes bubble-in {
+/* One split-flap cell: two slat halves split by a hinge line. */
+@utility flap-cell {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 2px;
+  background: linear-gradient(to bottom, #1d2126 0 50%, #15181c 50% 100%);
+  box-shadow: inset 0 -1px 0 rgb(0 0 0 / 0.5), 0 1px 1px rgb(0 0 0 / 0.4);
+  font-family: var(--font-display);
+  font-weight: 800;
+  line-height: 1;
+  text-transform: uppercase;
+  &::after {
+    content: "";
+    position: absolute;
+    inset: 50% 0 auto 0;
+    height: 1px;
+    background: rgb(0 0 0 / 0.75);
+  }
+}
+
+/* The top leaf drops onto the new character. */
+@keyframes flap {
+  0% {
+    transform: perspective(240px) rotateX(70deg);
+    filter: brightness(1.6);
+  }
+  100% {
+    transform: none;
+    filter: none;
+  }
+}
+
+/* A board row that just changed brightens, then settles. */
+@keyframes row-lit {
+  0% {
+    background-color: rgb(240 180 41 / 0.16);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+@utility animate-row-lit {
+  animation: row-lit 1400ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes slip-in {
   from {
     opacity: 0;
-    transform: translateY(6px);
+    transform: translateY(8px);
   }
   to {
     opacity: 1;
@@ -61,15 +122,27 @@
   }
 }
 
-@utility animate-bubble-in {
-  animation: bubble-in 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+@utility animate-slip-in {
+  animation: slip-in 240ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Typing indicator: each slat lights amber in turn, a stepped change like a board, not a bounce. */
+@keyframes typing-cell {
+  0%,
+  33% {
+    background: var(--color-signal);
+  }
+  34%,
+  100% {
+    background: var(--color-rule-strong);
+  }
+}
+
+@utility animate-typing-cell {
+  animation: typing-cell 960ms steps(1, end) infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  html {
-    scroll-behavior: auto;
-  }
-
   *,
   *::before,
   *::after {

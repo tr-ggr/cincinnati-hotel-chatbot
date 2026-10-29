@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link } from 'react-router';
-import { ArrowLeft, Hotel, RotateCcw, TriangleAlert } from 'lucide-react';
-import { Button } from '../components/ui';
+import { RotateCcw, TriangleAlert } from 'lucide-react';
+import { BackLink, Button, FlapText } from '../components/ui';
 import {
   Composer,
   MessageList,
@@ -16,6 +15,7 @@ import {
   isApiError,
   sendMessage,
   SUGGESTIONS,
+  useDocumentTitle,
   type Message,
 } from '../lib';
 
@@ -63,6 +63,7 @@ let localCounter = 0;
 const localKey = () => `local-${Date.now()}-${localCounter++}`;
 
 export default function Chat() {
+  useDocumentTitle('Chat');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [offers, setOffers] = useState<Record<string, ContactOffer>>({});
@@ -227,21 +228,27 @@ export default function Chat() {
   const composerDisabled = pending || booting || !!bootError;
 
   return (
-    <div className="flex h-dvh flex-col bg-page">
-      <header className="border-b border-line bg-surface">
-        <div className="mx-auto flex h-14 w-full max-w-[720px] items-center gap-2 px-2 sm:px-4">
-          <Link
-            to="/"
-            aria-label="Back to home"
-            className="flex size-9 shrink-0 items-center justify-center rounded-xl text-ink-soft transition-colors hover:bg-sunken focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+    <div className="flex h-dvh flex-col">
+      <header className="border-b-2 border-rule-strong bg-slat">
+        <div className="mx-auto flex w-full max-w-[760px] items-center gap-3 px-3 py-2.5 sm:px-6">
+          <BackLink />
+          <div className="min-w-0 flex-1">
+            <h1>
+              <span className="sr-only">Cincinnati Hotel Assistant</span>
+              <span aria-hidden="true">
+                <FlapText text="Cincinnati Hotel" a11y="inline" className="text-[1.125rem] sm:text-[1.375rem]" />
+              </span>
+            </h1>
+            <p className="mt-1 truncate text-xs text-dim">Assistant · answers from the hotel guide</p>
+          </div>
+          <Button
+            variant="secondary"
+            size="sm"
+            className="size-11 px-0 sm:h-11 sm:w-auto sm:px-3"
+            onClick={handleNewConversation}
+            disabled={pending || !hasUserMessages}
+            aria-label="New conversation"
           >
-            <ArrowLeft className="size-5" aria-hidden="true" />
-          </Link>
-          <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-accent text-white" aria-hidden="true">
-            <Hotel className="size-4" />
-          </span>
-          <h1 className="min-w-0 flex-1 truncate text-base font-semibold text-ink">Cincinnati Hotel Assistant</h1>
-          <Button variant="ghost" size="sm" onClick={handleNewConversation} disabled={pending} aria-label="New conversation">
             <RotateCcw className="size-4" aria-hidden="true" />
             <span className="hidden sm:inline">New conversation</span>
           </Button>
@@ -249,8 +256,8 @@ export default function Chat() {
       </header>
 
       {noDocument && (
-        <div role="alert" className="border-b border-amber-200 bg-accent-soft px-4 py-2.5 text-sm text-accent-ink">
-          <div className="mx-auto flex max-w-[720px] items-center gap-2">
+        <div role="alert" className="bg-signal px-4 py-2.5 text-sm font-semibold text-board">
+          <div className="mx-auto flex max-w-[760px] items-center gap-2 sm:px-2">
             <TriangleAlert className="size-4 shrink-0" aria-hidden="true" />
             {NO_DOC_MESSAGE}
           </div>
@@ -258,8 +265,8 @@ export default function Chat() {
       )}
 
       {bootError && (
-        <div role="alert" className="border-b border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-800">
-          <div className="mx-auto flex max-w-[720px] items-center justify-between gap-2">
+        <div role="alert" className="border-b border-stop/40 bg-stop/10 px-4 py-2.5 text-sm text-stop">
+          <div className="mx-auto flex max-w-[760px] items-center justify-between gap-2 sm:px-2">
             <span>{bootError}</span>
             <Button variant="secondary" size="sm" onClick={handleNewConversation}>
               Try again
@@ -282,8 +289,8 @@ export default function Chat() {
         }
       />
 
-      <div className="border-t border-line bg-surface pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3">
-        <div className="mx-auto w-full max-w-[720px] px-4">
+      <div className="border-t border-rule bg-slat pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3">
+        <div className="mx-auto w-full max-w-[760px] px-4 sm:px-6">
           <Composer onSend={handleSend} disabled={composerDisabled} />
         </div>
       </div>

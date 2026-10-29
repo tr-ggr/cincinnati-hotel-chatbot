@@ -24,25 +24,21 @@ export function MessageList({ messages, pending, sessionId, offers, onOfferChang
   }, [messages, pending, offers]);
 
   return (
-    <div className="flex-1 overflow-y-auto">
+    <div className="flex flex-1 flex-col overflow-y-auto">
+      {/* mt-auto anchors a short conversation to the composer instead of leaving a void above it. */}
       <div
         role="log"
         aria-live="polite"
         aria-label="Conversation"
-        className="mx-auto flex w-full max-w-[720px] flex-col gap-4 px-4 py-5"
+        className="mx-auto mt-auto flex w-full max-w-[760px] flex-col gap-5 px-4 py-6 sm:px-6"
       >
         {messages.map((m) => {
           const offer = offers[m.key];
           return (
-            <div key={m.key} className="animate-bubble-in flex flex-col gap-3">
+            <div key={m.key} className="animate-slip-in flex flex-col gap-3">
               <MessageBubble message={m} onRetry={onRetry} retryDisabled={pending} />
               {offer && offer.state !== 'dismissed' && sessionId && (
-                <div className="space-y-2 pl-10">
-                  {offer.state === 'open' && (
-                    <p className="text-sm text-ink-soft">
-                      Would you like to leave your contact details so our team can get back to you?
-                    </p>
-                  )}
+                <div>
                   <ContactFormCard
                     sessionId={sessionId}
                     question={offer.question}

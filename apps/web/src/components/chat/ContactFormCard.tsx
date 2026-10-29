@@ -43,7 +43,7 @@ export function ContactFormCard({ sessionId, question, done, onDone, onDismiss }
     return (
       <div
         role="status"
-        className="flex items-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800"
+        className="flex max-w-[min(100%,34rem)] items-center gap-2 rounded-slat border border-go/50 bg-go/10 px-4 py-3 text-sm font-medium text-go"
       >
         <CheckCircle2 className="size-5 shrink-0" aria-hidden="true" />
         Thanks, our team will contact you shortly.
@@ -69,7 +69,7 @@ export function ContactFormCard({ sessionId, question, done, onDone, onDismiss }
       });
       onDone();
     } catch (err) {
-      setApiError(isApiError(err) && err.code === 'RATE_LIMITED' ? "You're sending messages too quickly — please wait a moment and try again." : isApiError(err) ? err.message : 'Something went wrong. Please try again.');
+      setApiError(isApiError(err) && err.code === 'RATE_LIMITED' ? "You're sending messages too quickly. Wait a moment and try again." : isApiError(err) ? err.message : 'Something went wrong. Please try again.');
       setSubmitting(false);
     }
   };
@@ -83,7 +83,7 @@ export function ContactFormCard({ sessionId, question, done, onDone, onDismiss }
     props: { type: string; autoComplete: string; inputMode?: 'tel' | 'email' },
   ) => (
     <div>
-      <label htmlFor={`${uid}-${id}`} className="mb-1 block text-sm font-medium text-ink-soft">
+      <label htmlFor={`${uid}-${id}`} className="mb-1.5 block text-sm font-semibold text-dim">
         {label}
       </label>
       <Input
@@ -96,7 +96,7 @@ export function ContactFormCard({ sessionId, question, done, onDone, onDismiss }
         {...props}
       />
       {error && (
-        <p id={`${uid}-${id}-err`} className="mt-1 text-xs text-red-700">
+        <p id={`${uid}-${id}-err`} className="mt-1.5 text-sm text-stop">
           {error}
         </p>
       )}
@@ -108,23 +108,28 @@ export function ContactFormCard({ sessionId, question, done, onDone, onDismiss }
       onSubmit={submit}
       noValidate
       aria-label="Contact details"
-      className="space-y-3 rounded-2xl border border-line bg-surface p-4 shadow-sm"
+      className="max-w-[min(100%,34rem)] rounded-slat border border-rule-strong bg-slat"
     >
-      {field('name', 'Name', name, setName, errors.name, { type: 'text', autoComplete: 'name' })}
-      {field('phone', 'Phone', phone, setPhone, errors.phone, { type: 'tel', autoComplete: 'tel', inputMode: 'tel' })}
-      {field('email', 'Email', email, setEmail, errors.email, { type: 'email', autoComplete: 'email', inputMode: 'email' })}
-      {apiError && (
-        <p role="alert" className="text-sm text-red-700">
-          {apiError}
-        </p>
-      )}
-      <div className="flex items-center justify-end gap-2">
-        <Button variant="ghost" onClick={onDismiss} disabled={submitting}>
-          No thanks
-        </Button>
-        <Button type="submit" loading={submitting}>
-          Send details
-        </Button>
+      <p className="border-b border-rule px-4 py-3 text-base font-semibold text-pretty text-flap">
+        Would you like to leave your contact details so our team can get back to you?
+      </p>
+      <div className="space-y-3 p-4">
+        {field('name', 'Name', name, setName, errors.name, { type: 'text', autoComplete: 'name' })}
+        {field('phone', 'Phone', phone, setPhone, errors.phone, { type: 'tel', autoComplete: 'tel', inputMode: 'tel' })}
+        {field('email', 'Email', email, setEmail, errors.email, { type: 'email', autoComplete: 'email', inputMode: 'email' })}
+        {apiError && (
+          <p role="alert" className="text-sm text-stop">
+            {apiError}
+          </p>
+        )}
+        <div className="flex items-center justify-end gap-2 pt-1">
+          <Button variant="ghost" onClick={onDismiss} disabled={submitting}>
+            No thanks
+          </Button>
+          <Button type="submit" loading={submitting}>
+            Send details
+          </Button>
+        </div>
       </div>
     </form>
   );

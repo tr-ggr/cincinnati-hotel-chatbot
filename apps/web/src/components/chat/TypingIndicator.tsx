@@ -1,16 +1,12 @@
-import { Avatar } from './Avatar';
-
 export function TypingIndicator() {
   return (
-    <div className="flex items-end gap-2" role="status" aria-label="The assistant is typing">
-      <Avatar />
-      <div className="flex items-center gap-1 rounded-2xl rounded-bl-md border border-line bg-surface px-4 py-3.5 shadow-sm">
-        {[0, 150, 300].map((d) => (
-          <span
-            key={d}
-            className="size-1.5 animate-bounce rounded-full bg-muted"
-            style={{ animationDelay: `${d}ms` }}
-          />
+    <div className="flex flex-col items-start gap-1.5" role="status" aria-label="The assistant is typing">
+      <p className="ml-0.5 text-xs font-semibold uppercase tracking-[0.16em] text-muted" aria-hidden="true">
+        Concierge
+      </p>
+      <div className="flex items-center gap-1 rounded-slat border border-rule-strong bg-slat-2 p-3" aria-hidden="true">
+        {[0, 320, 640].map((d) => (
+          <span key={d} className="flap-cell animate-typing-cell h-4 w-3" style={{ animationDelay: `${d}ms` }} />
         ))}
       </div>
     </div>

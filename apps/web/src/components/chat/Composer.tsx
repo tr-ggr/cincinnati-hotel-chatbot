@@ -15,6 +15,8 @@ export function Composer({ onSend, disabled }: ComposerProps) {
   const [value, setValue] = useState('');
   const ref = useRef<HTMLTextAreaElement>(null);
   const wasDisabled = useRef(disabled);
+  // Only a message sent from here earns focus back; finishing boot must not pop the mobile keyboard.
+  const sentHere = useRef(false);
 
   useLayoutEffect(() => {
     const el = ref.current;
@@ -25,13 +27,17 @@ export function Composer({ onSend, disabled }: ComposerProps) {
 
   // Return focus once a reply arrives (the textarea is disabled while pending).
   useEffect(() => {
-    if (wasDisabled.current && !disabled) ref.current?.focus();
+    if (wasDisabled.current && !disabled && sentHere.current) {
+      sentHere.current = false;
+      ref.current?.focus();
+    }
     wasDisabled.current = disabled;
   }, [disabled]);
 
   const submit = () => {
     const text = value.trim();
     if (!text || disabled) return;
+    sentHere.current = true;
     onSend(text);
     setValue('');
   };
@@ -63,13 +69,13 @@ export function Composer({ onSend, disabled }: ComposerProps) {
         disabled={disabled}
         onChange={(e) => setValue(e.target.value)}
         onKeyDown={onKeyDown}
-        placeholder="Ask about rooms, dining, policies..."
-        className={cn(fieldClasses, 'min-h-11 resize-none py-2.5 leading-6')}
+        placeholder="Ask about rooms, dining, policies…"
+        className={cn(fieldClasses, 'min-h-12 resize-none py-3 leading-6')}
       />
       <Button
         type="submit"
         size="md"
-        className="size-11 shrink-0 px-0"
+        className="size-12 shrink-0 px-0"
         disabled={disabled || !value.trim()}
         aria-label="Send message"
       >
