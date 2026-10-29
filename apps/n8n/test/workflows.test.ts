@@ -289,6 +289,57 @@ describe('03-lead-email', () => {
     const out = runCode(filledCode, { Webhook: { body: { lead: { name: 'Guest' }, transcript: [] } } }, { text: 'summary' });
     expect(out.payload).toMatchObject({ from, to: ['a@example.test', 'b@example.test'] });
   });
+
+  describe('long conversations', () => {
+    type Attachment = { filename: string; content: string; content_type: string };
+    type Payload = { html: string; text: string; attachments: Attachment[] };
+    const filledCode = code
+      .replace('${EMAIL_FROM_JSON}', () => JSON.stringify('Desk <desk@example.test>'))
+      .replace('${LEAD_TO_JSON}', () => JSON.stringify('team@example.test'));
+    const sessionId = '0f1e2d3c-4b5a-6978-8a9b-0c1d2e3f4a5b';
+    const transcript = Array.from({ length: 120 }, (_, i) => ({
+      role: i % 2 ? 'assistant' : 'user',
+      content: `msg-${i} café – 日本 ` + 'x'.repeat(1500),
+      created_at: '2026-10-30T10:00:00Z',
+    }));
+    const compose = (input: Record<string, unknown>) =>
+      runCode(
+        filledCode,
+        { Webhook: { body: { lead: { name: 'Guest', phone: '+1 555', email: 'g@example.test' }, session_id: sessionId, unanswered_question: 'Is there a helipad?', transcript } } },
+        input,
+      ).payload as Payload;
+    const decode = (a: Attachment) => Buffer.from(a.content, 'base64').toString('utf8');
+
+    it('keeps the body short: only the last 6 messages, well under the Gmail clip size', () => {
+      const p = compose({ text: 'SUMMARY\nGuest asked about rooms.' });
+      expect(p.html.length).toBeLessThan(100_000);
+      expect(p.html).toContain('Showing the last 6 of 120 messages');
+      expect(p.text).toContain('Showing the last 6 of 120 messages');
+      expect(p.html).toContain('msg-119');
+      expect(p.html).not.toContain('msg-113 ');
+      expect(p.html).toContain('Is there a helipad?');
+    });
+
+    it('attaches the full untruncated transcript as UTF-8 Markdown', () => {
+      const p = compose({ text: 'SUMMARY\nGuest asked about rooms.' });
+      expect(p.attachments).toHaveLength(1);
+      const [a] = p.attachments;
+      expect(a.filename).toMatch(/^transcript-[0-9a-f]{8}\.md$/);
+      expect(a.content_type).toBe('text/markdown; charset=utf-8');
+      const md = decode(a);
+      for (const m of transcript) expect(md).toContain(m.content);
+      expect(md).toContain('## Unanswered question\n\nIs there a helipad?');
+      expect(md).toContain('Guest asked about rooms.');
+      expect(md).not.toContain('+1 555');
+      expect(md).not.toContain('g@example.test');
+    });
+
+    it('still attaches the transcript when the summary is unavailable', () => {
+      const p = compose({});
+      expect(p.html).toContain('Automatic summary unavailable');
+      expect(decode(p.attachments[0])).toContain('_Automatic summary unavailable._');
+    });
+  });
 });
 
 describe('credentials.template.json', () => {

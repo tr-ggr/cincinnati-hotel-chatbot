@@ -371,11 +371,15 @@ Input: `{ "session_id", "message_id", "question", "document_id", "history": [{ "
 Input: `{ "lead": { "name", "phone", "email" }, "session_id", "unanswered_question", "transcript": [{ "role", "content", "created_at" }] }`
 
 1. `Webhook`
-2. `Basic LLM Chain` "Summarize conversation" — prompt `apps/n8n/prompts/lead-summary.md` → 3–5 sentence summary + bullet list of unanswered questions. Settings → **On Error: Continue** (email still goes out with the raw transcript if the LLM fails)
+2. `Basic LLM Chain` "Summarize conversation" — prompt `apps/n8n/prompts/lead-summary.md` → 3–5 sentence summary + bullet list of unanswered questions. Settings → **On Error: Continue** (email still goes out with the attached transcript if the LLM fails)
    - `OpenAI Chat Model` — `gpt-4.1-mini`, temperature 0.2
-3. `Code` "Compose email" — builds `subject`, `html`, `text`: lead details table, summary, highlighted unanswered question, full transcript
+3. `Code` "Compose email" — builds `subject`, `html`, `text`: lead details table, highlighted unanswered question, summary, and only the
+   **last 6 messages** (each capped at 1000 chars, with a "Showing the last N of M messages" note). The **full, untruncated transcript**
+   is attached as `transcript-<first 8 chars of session id>.md` (UTF-8 Markdown: session, guest name, unanswered question, summary,
+   every message; no phone/email). This keeps a long chat's body well under Gmail's ~102 KB clipping limit; Resend's 40 MB cap
+   (attachments included, after base64) is never reached because messages are capped at 2000 chars
 4. `HTTP Request` — POST `https://api.resend.com/emails`, credential `Resend` (Header Auth `Authorization: Bearer <RESEND_API_KEY>`), JSON body
-   `{ from: EMAIL_FROM, to: [LEAD_TO entries], reply_to: lead.email, subject: "Cincinnati Hotel chatbot — contact request from <name>", html, text }`
+   `{ from: EMAIL_FROM, to: [LEAD_TO entries], reply_to: lead.email, subject: "Cincinnati Hotel chatbot — contact request from <name>", html, text, attachments: [{ filename, content: <base64>, content_type: "text/markdown; charset=utf-8" }] }`
    (`LEAD_TO` is a comma-separated list. `apps/n8n/scripts/import.sh` substitutes `${EMAIL_FROM_JSON}` and `${LEAD_TO_JSON}` into the `Compose email` code node at import time as JSON-escaped JavaScript string literals, so a quote or apostrophe in the sender name cannot break the code. The node splits `LEAD_TO` on commas. The repo JSON keeps the placeholders, so no real address is committed. If either value is empty, the `Compose email` node throws and the lead is recorded with `emailStatus: failed`.)
 5. `Respond to Webhook` — `{ "ok": true, "email_id": "<resend id>", "summary": "..." }`
 

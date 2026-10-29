@@ -16,7 +16,7 @@
    tab's numbers and category row flip within about a second.
 3. Ask *"Is there a helipad on the roof?"*. You get *"I'm sorry, I don't have that information right now."* and a
    short contact form (Name, Phone, Email).
-4. Submit the form. An email with a summary of the conversation and the unanswered question goes to the hotel team
+4. Submit the form. An email with a summary of the conversation and the unanswered question (full transcript attached as a `.md` file) goes to the hotel team
    (`idan@tauga.ai`, `deleonajiraydiego@gmail.com`).
 5. Optional: on **Admin**, upload any text PDF. The card reads the guide in the background, then the chatbot answers
    only from the new document.
@@ -33,7 +33,7 @@ fallback, because the bot answers only from the hotel document.
 | Landing with **Admin** and **Regular User** | `apps/web/src/pages/Landing.tsx` |
 | Answers only from the uploaded PDF | n8n WF2: retrieval scoped to the active document → grounded system prompt → deterministic guard ([PDF-PROCESSING](PDF-PROCESSING.md#3-why-answers-can-only-come-from-the-pdf)) |
 | Polite fallback + contact form (Name, Phone, Email) | WF2 Guard returns the exact sentence; `ContactFormCard.tsx` |
-| Email with conversation summary + unanswered question | n8n WF3: LLM summary → Resend |
+| Email with conversation summary + unanswered question | n8n WF3: LLM summary → Resend; body shows the latest messages, full transcript attached as `.md` |
 | Single PDF, a new upload replaces the old one | `POST /api/admin/document` → WF1; old chunks are deleted when the new document is activated |
 | Total sessions and questions per category, in real time | SSE stream `GET /api/admin/stats/stream` ([ADMIN-DASHBOARD](ADMIN-DASHBOARD.md)) |
 | React frontend, Node.js backend, AI logic in n8n | React 19 + Vite, Fastify 5, three n8n workflows; the API never calls OpenAI |

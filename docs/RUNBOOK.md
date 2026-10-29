@@ -106,7 +106,7 @@ Real mode sends embeddings and chat to OpenAI, and lead emails through Resend.
    The API answers `202` with `status: "processing"` straight away and ingests in the background. Poll
    `curl -s http://localhost:8080/api/admin/document` until the new document shows `"status":"ready"`.
 
-5. Run the real-mode tests (this uploads the sample PDF again and sends two real lead emails to `LEAD_TO`):
+5. Run the real-mode tests (this uploads the sample PDF again and sends three real lead emails to `LEAD_TO`):
 
    ```bash
    pnpm e2e:real
@@ -116,7 +116,9 @@ Real mode sends embeddings and chat to OpenAI, and lead emails through Resend.
    question, expected, actual, category and `best_score` for each question, and passes when the `answered` flags match
    the expected verdicts (see the spec for the exact threshold). The set covers answerable, unanswerable, off-topic,
    prompt-injection and partial questions. The lead spec posts straight to the WF3 webhook and passes when n8n returns
-   `ok: true` and an `email_id`. The smoke lead step skips itself when `LEAD_TO` contains a reviewer address;
+   `ok: true` and an `email_id`. Its long-conversation test (80 messages) then reads the sent email back from the Resend
+   API and checks that the body shows only the last 6 messages (under 100 KB) and that `transcript-00000000.md` is
+   attached with every message; that part skips itself when `RESEND_API_KEY` is a sending-only key. The smoke lead step skips itself when `LEAD_TO` contains a reviewer address;
    `lead.spec.ts` also skips when `LEAD_TO` is empty.
 
 Useful links in local mode: web <http://localhost:8080>, n8n editor <http://localhost:5678>, API health
@@ -233,7 +235,7 @@ pnpm --filter e2e report                                     # open the HTML rep
 | `E2E_BASE_URL` | `http://localhost:8080` | Web app (nginx) to test. On Windows, if `localhost` reaches another program, use `http://[::1]:8080` |
 | `E2E_N8N_URL` | `http://localhost:5678` | n8n for the `real` project (published by `compose.override.yml`) |
 
-In real mode the smoke spec's lead step sends one email to `LEAD_TO`, and `lead.spec.ts` sends a second one.
+In real mode the smoke spec's lead step sends one email to `LEAD_TO`, and `lead.spec.ts` sends two more (short chat, long chat).
 
 ## Deploy to a VPS
 
