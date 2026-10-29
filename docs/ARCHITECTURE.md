@@ -34,7 +34,7 @@ Local development has no tunnel: the browser talks to `http://localhost:8080` (o
 
 ### Chosen technologies and why
 
-- **React 19, Vite, Tailwind v4.** A small single-page app with a fast dev loop. Tailwind v4 needs no config file. The UI adds only Recharts (the one chart), lucide-react (icons), react-markdown (assistant answers) and clsx. There is no component library and no state library, because the brief favours a light UI.
+- **React 19, Vite, Tailwind v4.** A small single-page app with a fast dev loop. Tailwind v4 needs no config file. The UI adds only lucide-react (icons), react-markdown (assistant answers) and clsx; the admin category board is plain CSS. Fonts (Big Shoulders Display, Atkinson Hyperlegible Next) load from Google Fonts. There is no component library and no state library, because the brief favours a light UI.
 - **Fastify 5 with TypeScript (ESM).** The API is a thin, typed layer: zod validates input, `pg` runs hand-written SQL in `db/queries.ts` (no ORM), and SSE is about 50 lines in `lib/sse.ts`.
 - **n8n 2.45.5 for all AI work.** Every AI step (download, load, split, embed, retrieve, prompt, parse, guard, email) is a node with its own execution log. Prompts and models can be inspected and changed in the editor without touching API code. The version is pinned in `.env`; `latest` is never used.
 - **Postgres 16 with pgvector.** One database holds the app data and the vectors, so no separate vector service is needed. The `chunks` table uses the LangChain layout that the n8n PGVector node expects, which means n8n writes vectors without custom code. An HNSW index on cosine distance serves retrieval.
@@ -116,7 +116,7 @@ TaugaAI/
 │           ├── lib/useStatsStream.ts # SSE hook with polling fallback
 │           ├── components/ui/        # Button, Card, Input, Badge, Spinner, Skeleton
 │           ├── components/chat/      # MessageList, MessageBubble, Composer, TypingIndicator, ContactFormCard, SuggestionChips
-│           ├── components/admin/     # UploadCard, StatCard, CategoryChart, LiveBadge
+│           ├── components/admin/     # UploadCard, StatCard, CategoryChart (departures-board rows)
 │           └── pages/                # Landing.tsx, Chat.tsx, Admin.tsx, NotFound.tsx
 │   └── n8n/                          # workspace package (no build); mounted read-only into the n8n container at /import
 │       ├── README.md                 # node-by-node explanation, credentials, import/export
@@ -133,7 +133,7 @@ TaugaAI/
 
 Packages
 - api: `fastify@5`, `@fastify/multipart`, `@fastify/cors`, `@fastify/rate-limit`, `pg`, `zod`, `pdf-parse`; dev `typescript`, `tsx`, `@types/node`, `@types/pg`, `pino-pretty`.
-- web: `react@19`, `react-dom@19`, `react-router@7`, `tailwindcss@4`, `@tailwindcss/vite`, `recharts`, `lucide-react`, `react-markdown`, `clsx`; dev `vite`, `@vitejs/plugin-react`, `typescript`.
+- web: `react@19`, `react-dom@19`, `react-router@7`, `tailwindcss@4`, `@tailwindcss/vite`, `lucide-react`, `react-markdown`, `clsx`; dev `vite`, `@vitejs/plugin-react`, `typescript`.
 - tests: `vitest` (api, web, n8n), `@playwright/test` (e2e).
 - root dev: `turbo`, `pdfkit`, `@types/pdfkit`, `tsx`.
 
@@ -405,21 +405,21 @@ The UI (not the model) appends "Would you like to leave your contact details so 
 
 ## §6 Frontend
 
-Design: light theme, warm neutral palette (stone + amber accent), system font stack, chat column max 720 px, admin grid max 1100 px. Modern/clean, dependency-light. Mobile-usable at 375 px.
+Design: a Union Terminal split-flap departures board (full system in `apps/web/DESIGN.md`): dark slat board, ivory flap lettering in Big Shoulders Display, signal-amber plates as the one action colour, Atkinson Hyperlegible Next for prose, assistant answers on ivory enquiry slips. Chat column max 760 px, admin grid max 1180 px. Dependency-light. Mobile-usable at 375 px.
 
-- **`/` Landing** — hotel mark + "Cincinnati Hotel Assistant", one-line subtitle, two large buttons/cards **Admin** (shield icon) and **Regular User** (message icon). Footer "Powered by n8n + OpenAI".
+- **`/` Landing** — "Cincinnati Hotel Assistant" in flap letters with a flap clock, one-line subtitle, and two board rows that act as the buttons **Regular User** and **Admin** (each with destination copy, status flap and a "Board" plate).
 - **`/chat`**
   - On mount `POST /api/sessions`; id stored in `sessionStorage` so refresh keeps the conversation; "New conversation" clears it. Existing session → `GET /api/sessions/:id` to rehydrate.
   - Client-side welcome bubble (not persisted) + 3 suggestion chips (questions answerable from the sample PDF).
-  - Bubbles: user right, assistant left with avatar; `react-markdown` for assistant text; subtle category badge under assistant answers; typing indicator (3 dots) while pending.
+  - Entries: "YOU" right, "CONCIERGE" left on an ivory slip, each with its time; `react-markdown` for assistant text; the internal category is not shown to guests; typing indicator (3 slats lighting in turn) while pending. A short conversation sits just above the composer. The composer refocuses only after a message is sent from it (not on load).
   - Composer: autosizing textarea, Enter sends, Shift+Enter newline, disabled while pending.
   - `offerContactForm` → inline **ContactFormCard** after the sorry message: Name / Phone / Email → `POST /api/leads` → "Thanks, our team will contact you shortly." (card collapses). "No thanks" dismisses. Shown once per unanswered question.
   - 409 `NO_DOCUMENT` → banner "The knowledge base hasn't been uploaded yet. Please ask an admin." · 502 → retry toast on the failed message.
 - **`/admin`**
-  - Header with `LiveBadge` (green "Live" when SSE connected, grey "Polling" fallback).
+  - Header with the title; a plain "Live updates paused, refreshing every 10 s" line only when polling. Real time shows as flipping numbers and a brief row highlight, with no badge.
   - **UploadCard**: current document (filename, pages, chunks, uploaded time, status pill) + drag-drop / file picker, "Replace" button, "Processing (embedding chunks)…" state, error display.
-  - **StatCards**: Total sessions · Questions asked · Unanswered · Leads captured.
-  - **CategoryChart**: Recharts horizontal `BarChart` of questions per category (all 8, sorted desc, zeros rendered, value labels).
+  - **StatCards**: one strip of 4 cells (2×2 on phones): Total sessions · Questions asked · Unanswered (NN% of questions) · Leads captured.
+  - **CategoryChart**: board rows per category (all 8, sorted desc, zeros shown): name, 16-segment meter, flap count, plus a visually hidden table.
   - `useStatsStream`: EventSource on `/api/admin/stats/stream`; after 2 failed reconnects switch to `GET /api/admin/stats` every 10 s.
 - Routing: `react-router` `BrowserRouter`; nginx `try_files $uri /index.html`; `*` → NotFound.
 

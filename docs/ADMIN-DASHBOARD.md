@@ -1,26 +1,29 @@
 # Admin dashboard
 
 The `/admin` page shows how the chatbot is being used and lets an admin replace the knowledge base PDF. It updates
-in real time: when a guest sends a message, the numbers and the category chart change within about a second, with no
+in real time: when a guest sends a message, the numbers and the category board change within about a second, with no
 reload. The page reads from the database on every change, so the numbers are never a client-side guess.
+
+The page is styled as a split-flap departures board (see `apps/web/DESIGN.md`): changed numbers flip to their new
+value and the changed row briefly lights up, which is how the page shows it is live. There is no "Live" badge.
 
 The API contract is in [`ARCHITECTURE.md`](ARCHITECTURE.md) §4 (`GET /api/admin/stats`, `GET /api/admin/stats/stream`).
 
 ## What the page shows
 
-Top to bottom, on a 1100 px-wide grid that stacks to one column on phones:
+Top to bottom, on a 1180 px-wide grid that stacks to one column on phones:
 
 | Area | Content | Source field |
 |---|---|---|
-| Header | "Admin dashboard" title and a live status badge (**Live**, **Polling**, or **Connecting**) | connection mode |
-| Key numbers | Four stat cards: **Total sessions**, **Questions asked**, **Unanswered** (with an *Answer rate NN%* sub-label once there are questions), **Leads captured** | `totalSessions`, `totalQuestions`, `unansweredQuestions`, `totalLeads` |
-| Knowledge base | Upload card: current PDF name, pages, chunks, upload time and status pill (Ready, Processing, Failed). Drag-and-drop or a file picker, "Replace PDF", and an error line for failed uploads | `activeDocument` |
-| Categories | Horizontal bar chart of questions per category. All eight categories are always shown, zeros included, sorted by count, with value labels | `byCategory` |
+| Header | "Admin dashboard" title. When the SSE stream has fallen back to polling, a plain line reads "Live updates paused, refreshing every 10 s" | connection mode |
+| Key numbers | One stat strip (4 cells, 2×2 on phones): **Total sessions**, **Questions asked**, **Unanswered** (with an *NN% of questions* sub-label once there are questions), **Leads captured** | `totalSessions`, `totalQuestions`, `unansweredQuestions`, `totalLeads` |
+| Categories | Board rows, one per category: name, a 16-segment meter scaled to the busiest category, and the count in flap digits. All eight categories are always shown, zeros included, sorted by count | `byCategory` |
+| Knowledge base | Current PDF name, pages, chunks, upload time and status flap (Ready, Processing, Failed). Drag-and-drop or a file picker, "Replace PDF", and an error line for failed uploads | `activeDocument` |
 
-Accessibility choices: the chart has a visually hidden table with the same numbers, the live badge is a
-`role="status"` region, and the badge's pulse animation is turned off for users who prefer reduced motion.
+Accessibility choices: the category board has a visually hidden table with the same numbers, the polling notice is a
+`role="status"` region, and the flip and highlight animations are turned off for users who prefer reduced motion.
 
-The admin route is code-split with `React.lazy`, so guests on `/chat` do not download Recharts.
+The board is plain CSS (no chart library), and the admin route is code-split with `React.lazy`.
 
 ## Stat definitions
 

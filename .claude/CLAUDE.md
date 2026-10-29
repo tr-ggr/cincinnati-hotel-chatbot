@@ -37,7 +37,7 @@ workflows, compose topology and prompts. Sprint cards reference its sections (§
 - n8n workflow JSON in `apps/n8n/workflows/` is the source of truth. After editing in the UI, re-export:
   `docker compose exec n8n n8n export:workflow --all --separate --output=/import/workflows`
 - Never float `n8nio/n8n:latest`; `N8N_VERSION` is pinned in `.env(.example)`.
-- Keep the UI dependency-light: Tailwind v4, lucide-react, recharts, react-markdown, clsx. No shadcn, no state libraries.
+- Keep the UI dependency-light: Tailwind v4, lucide-react, react-markdown, clsx. No shadcn, no chart or state libraries. Visual system: `apps/web/DESIGN.md`.
 - Tests: API tests live in `apps/api/test/` (outside `src/`, so `tsc` builds ignore them) and use `buildApp` from `src/app.ts`;
   web tests sit next to the code as `*.test.ts`. The category / prompt parity tests enforce the two rules above.
 - Ports: web 8080 (nginx) / 5173 (vite), api 3000, n8n 5678, postgres 5432 (api/postgres host ports overridable via API_HOST_PORT / POSTGRES_HOST_PORT).
