@@ -5,7 +5,8 @@ build/
 .env.*
 !.env.example
 uploads/
-n8n/credentials.json
+apps/n8n/credentials.json
+apps/web/.impeccable/
 coverage/
 playwright-report/
 test-results/

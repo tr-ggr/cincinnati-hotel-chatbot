@@ -14,7 +14,7 @@
     "test": "turbo run test",
     "e2e": "turbo run e2e --filter=e2e",
     "e2e:real": "turbo run e2e:real --filter=e2e",
-    "n8n:import": "pnpm --filter n8n import",
+    "n8n:import": "pnpm --filter n8n run import",
     "sample:pdf": "tsx docs/sample/generate-sample-pdf.ts"
   },
   "devDependencies": {

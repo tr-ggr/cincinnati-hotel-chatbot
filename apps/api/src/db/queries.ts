@@ -281,6 +281,11 @@ export async function updateMessageClassification(
   return rows[0] ? mapMessage(rows[0]) : null;
 }
 
+/** Removes a question whose answer never arrived (n8n failed), so a retry does not count it twice. */
+export async function deleteMessage(id: string): Promise<void> {
+  await query('DELETE FROM messages WHERE id = $1', [id]);
+}
+
 // ---------- leads ----------
 
 export interface InsertLeadInput {
@@ -334,9 +339,10 @@ export async function insertDocument(input: InsertDocumentInput): Promise<Docume
 }
 
 /**
- * One transaction: deactivate all, then activate `id` (status ready, chunk_count, ready_at).
- * Returns the activated document and the previously active one (null if none / same id) so the
- * caller can delete the old file.
+ * One transaction: deactivate all, activate `id` (status ready, chunk_count, ready_at) and delete every
+ * chunk that belongs to another document. Purging here, not in n8n, means a failed or concurrent upload
+ * can never empty the live knowledge base. Returns the activated document and the previously active one
+ * (null if none / same id) so the caller can delete the old file.
  */
 export async function activateDocument(
   id: string,
@@ -351,6 +357,7 @@ export async function activateDocument(
       [id, chunkCount],
     );
     if (!res.rows[0]) throw new Error(`Document ${id} not found`);
+    await client.query("DELETE FROM chunks WHERE metadata->>'document_id' <> $1", [id]);
     const p = prev.rows[0];
     return { document: mapDocument(res.rows[0]), previous: p && p.id !== id ? mapDocument(p) : null };
   });
@@ -360,6 +367,33 @@ export async function failDocument(id: string, error: string): Promise<DocumentR
   const rows = await query<DocumentDbRow>(
     "UPDATE documents SET status = 'failed', error = $2 WHERE id = $1 RETURNING *",
     [id, error],
+  );
+  return rows[0] ? mapDocument(rows[0]) : null;
+}
+
+/** At startup: an ingest cannot survive a restart, so any upload still `processing` has failed. */
+export async function failInterruptedDocuments(): Promise<number> {
+  const rows = await query<{ id: string }>(
+    "UPDATE documents SET status = 'failed', error = 'Interrupted by a server restart. Please upload again.' WHERE status = 'processing' RETURNING id",
+  );
+  return rows.length;
+}
+
+/** Drops the chunks a failed ingest may have written before it stopped. */
+export async function deleteChunksForDocument(id: string): Promise<void> {
+  await query("DELETE FROM chunks WHERE metadata->>'document_id' = $1", [id]);
+}
+
+/**
+ * The newest upload that is not active and was uploaded after the active one, while it is still
+ * `processing` or has `failed`. Null once it becomes active, or when nothing newer exists.
+ */
+export async function getPendingDocument(): Promise<DocumentRow | null> {
+  const rows = await query<DocumentDbRow>(
+    `SELECT * FROM documents d
+     WHERE NOT d.is_active AND d.status IN ('processing', 'failed')
+       AND d.uploaded_at > COALESCE((SELECT uploaded_at FROM documents WHERE is_active), '-infinity')
+     ORDER BY d.uploaded_at DESC LIMIT 1`,
   );
   return rows[0] ? mapDocument(rows[0]) : null;
 }

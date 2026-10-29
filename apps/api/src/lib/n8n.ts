@@ -97,7 +97,7 @@ type Endpoint = 'ingest' | 'chat' | 'lead';
 
 const ENDPOINTS: Record<Endpoint, { code: N8nErrorCode; timeoutMs: number }> = {
   ingest: { code: 'INGEST_FAILED', timeoutMs: 180_000 },
-  chat: { code: 'ASSISTANT_UNAVAILABLE', timeoutMs: 30_000 },
+  chat: { code: 'ASSISTANT_UNAVAILABLE', timeoutMs: 45_000 },
   lead: { code: 'LEAD_EMAIL_FAILED', timeoutMs: 30_000 },
 };
 

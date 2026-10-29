@@ -111,7 +111,9 @@ export async function buildApp(config: Config): Promise<FastifyInstance> {
   const n8n = createN8nClient(config);
   const deps = { config, n8n };
 
-  await app.register(cors, { origin: true });
+  // The browser only ever calls the API same-origin (nginx in prod, the Vite proxy in dev), so no
+  // cross-origin reads are allowed.
+  await app.register(cors, { origin: false });
   // Global 60/min/IP. Per-route overrides: upload 10/min (admin.ts); health, stats stream and
   // /internal/* opt out with `config: { rateLimit: false }`.
   await app.register(rateLimit, {

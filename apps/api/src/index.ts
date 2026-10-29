@@ -1,5 +1,6 @@
 import { buildApp } from './app.js';
 import { ConfigError, loadConfig, type Config } from './config.js';
+import { failInterruptedDocuments } from './db/queries.js';
 
 const SHUTDOWN_TIMEOUT_MS = 10_000;
 
@@ -16,6 +17,11 @@ async function main(): Promise<void> {
   }
 
   const app = await buildApp(config);
+  const interrupted = await failInterruptedDocuments().catch((err: unknown) => {
+    app.log.warn({ err }, 'could not mark interrupted uploads as failed');
+    return 0;
+  });
+  if (interrupted > 0) app.log.warn({ count: interrupted }, 'marked interrupted uploads as failed');
 
   let shuttingDown = false;
   const shutdown = async (signal: NodeJS.Signals): Promise<void> => {

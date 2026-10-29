@@ -13,7 +13,7 @@ const envSchema = z.object({
   N8N_MOCK: z.enum(['0', '1']).default('0'),
   INTERNAL_BASE_URL: z.url(),
   UPLOAD_DIR: z.string().min(1).default('./uploads'),
-  MAX_UPLOAD_MB: z.coerce.number().positive().default(25),
+  MAX_UPLOAD_MB: z.coerce.number().positive().default(10),
 });
 
 export interface Config {

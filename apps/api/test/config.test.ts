@@ -11,8 +11,8 @@ const base = {
 describe('loadConfig', () => {
   it('applies defaults', () => {
     const c = loadConfig(base);
-    expect(c).toMatchObject({ nodeEnv: 'development', port: 3000, n8nMock: false, uploadDir: './uploads', maxUploadMb: 25 });
-    expect(c.maxUploadBytes).toBe(25 * 1024 * 1024);
+    expect(c).toMatchObject({ nodeEnv: 'development', port: 3000, n8nMock: false, uploadDir: './uploads', maxUploadMb: 10 });
+    expect(c.maxUploadBytes).toBe(10 * 1024 * 1024);
   });
 
   it('parses N8N_MOCK and numeric values', () => {

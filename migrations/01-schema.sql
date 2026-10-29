@@ -61,12 +61,4 @@ CREATE TABLE leads (
   created_at           timestamptz NOT NULL DEFAULT now()
 );
 
--- Dashboard query (GET /api/admin/stats and the SSE broadcaster)
-CREATE VIEW stats_overview AS
-SELECT
-  (SELECT count(*) FROM sessions s WHERE EXISTS (SELECT 1 FROM messages m WHERE m.session_id = s.id AND m.role='user'))::int AS total_sessions,
-  (SELECT count(*) FROM messages WHERE role='user')::int                       AS total_questions,
-  (SELECT count(*) FROM messages WHERE role='user' AND answered = false)::int  AS unanswered_questions,
-  (SELECT count(*) FROM leads)::int                                            AS total_leads,
-  (SELECT coalesce(json_agg(json_build_object('category', c, 'count', n) ORDER BY n DESC), '[]'::json)
-     FROM (SELECT category AS c, count(*) AS n FROM messages WHERE role='user' AND category IS NOT NULL GROUP BY category) t) AS by_category;
+-- The dashboard view lives in 02-stats-view.sql so it can be re-applied to an existing database.

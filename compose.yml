@@ -1,6 +1,6 @@
 # Run from the repo root: `docker compose up -d --build` (dev, merges compose.override.yml).
 # Deploy: `docker compose -f compose.yml --profile tunnel up -d --build`. Compose reads ./.env automatically.
-# Memory budget (4 GB VPS): postgres 144m + n8n 1g + api 128m + web 16m + cloudflared 48m = 1360m.
+# Memory budget (4 GB VPS): postgres 144m + n8n 1g + api 192m + web 16m + cloudflared 48m = 1424m.
 # Node heap caps (NODE_OPTIONS / N8N_RUNNERS_MAX_OLD_SPACE_SIZE) sit below each mem_limit so V8 GCs before the OOM killer.
 name: cincinnati-hotel
 services:
@@ -67,8 +67,8 @@ services:
       N8N_UNVERIFIED_PACKAGES_ENABLED: "false"
       N8N_COMPRESSION_NODE_MAX_DECOMPRESSED_SIZE_BYTES: 268435456
       N8N_COMPRESSION_NODE_MAX_ZIP_ENTRIES: 1000
-      # Keep only failed executions, pruned after 72 h.
-      EXECUTIONS_DATA_SAVE_ON_SUCCESS: none
+      # Keep every production execution (reviewers inspect them), pruned after 72 h or 1000 runs.
+      EXECUTIONS_DATA_SAVE_ON_SUCCESS: all     # reviewers can open real runs; pruned below
       EXECUTIONS_DATA_SAVE_ON_ERROR: all
       EXECUTIONS_DATA_SAVE_ON_PROGRESS: "false"
       EXECUTIONS_DATA_SAVE_MANUAL_EXECUTIONS: "false"
@@ -87,13 +87,13 @@ services:
   api:
     build: { context: ., dockerfile: apps/api/Dockerfile }
     restart: unless-stopped
-    mem_limit: 128m
+    mem_limit: 192m
     depends_on:
       postgres: { condition: service_healthy }
       n8n: { condition: service_healthy }
     environment:
       NODE_ENV: production
-      NODE_OPTIONS: --max-old-space-size=96
+      NODE_OPTIONS: --max-old-space-size=128
       PORT: 3000
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       N8N_BASE_URL: http://n8n:5678
@@ -101,7 +101,7 @@ services:
       N8N_MOCK: ${N8N_MOCK:-0}
       INTERNAL_BASE_URL: http://api:3000
       UPLOAD_DIR: /data/uploads
-      MAX_UPLOAD_MB: 25
+      MAX_UPLOAD_MB: 10
     volumes:
       - uploads:/data/uploads
     healthcheck:
@@ -117,7 +117,7 @@ services:
     depends_on: [api]
 
   cloudflared:
-    image: cloudflare/cloudflared:latest
+    image: cloudflare/cloudflared:2026.10.1   # pinned; bump deliberately
     restart: unless-stopped
     mem_limit: 48m
     command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}

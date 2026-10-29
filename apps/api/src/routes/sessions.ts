@@ -6,6 +6,7 @@ import { isCategory } from '../lib/categories.js';
 import { emitStatsChanged } from '../lib/events.js';
 import {
   createSession,
+  deleteMessage,
   getActiveDocument,
   getSession,
   insertMessage,
@@ -39,8 +40,8 @@ export function summarizeIssues(error: z.ZodError): string {
 export const registerSessionRoutes: FastifyPluginAsync<RouteDeps> = async (app, { n8n }) => {
   app.post('/api/sessions', async (request, reply) => {
     const ua = request.headers['user-agent'];
+    // No stats event: a session only counts once it has a question.
     const session = await createSession(typeof ua === 'string' ? ua : null);
-    emitStatsChanged();
     return reply.code(201).send({ id: session.id, startedAt: session.startedAt });
   });
 
@@ -105,10 +106,10 @@ export const registerSessionRoutes: FastifyPluginAsync<RouteDeps> = async (app, 
         history,
       });
     } catch (err) {
-      // 5. failure: leave the user message, report 502
+      // 5. failure: drop the unanswered user message so a retry is not counted twice, report 502
       request.log.warn({ err }, 'n8n chat failed');
+      await deleteMessage(userRow.id);
       await touchSession(id);
-      emitStatsChanged();
       logChat('assistant_unavailable', {
         questionLength,
         messageId: userRow.id,

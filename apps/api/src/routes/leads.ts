@@ -4,6 +4,11 @@ import { emitStatsChanged } from '../lib/events.js';
 import { getSession, insertLead, listMessages, updateLeadEmail } from '../db/queries.js';
 import { sendError, summarizeIssues, type RouteDeps } from './sessions.js';
 
+function isTimeout(err: unknown): boolean {
+  const cause = err instanceof Error ? (err.cause as { name?: string } | undefined) : undefined;
+  return cause?.name === 'TimeoutError' || cause?.name === 'AbortError';
+}
+
 const leadBodySchema = z.object({
   sessionId: z.uuid(),
   name: z.string().trim().min(1).max(200),
@@ -45,12 +50,21 @@ export const registerLeadRoutes: FastifyPluginAsync<RouteDeps> = async (app, { n
     try {
       const messages = await listMessages(sessionId);
       transcriptMessages = messages.length;
-      const result = await n8n.lead({
+      const input = {
         lead: { name, phone, email },
         session_id: sessionId,
         unanswered_question: unansweredQuestion ?? null,
         transcript: messages.map((m) => ({ role: m.role, content: m.content, created_at: m.createdAt })),
-      });
+      };
+      let result: Awaited<ReturnType<typeof n8n.lead>>;
+      try {
+        result = await n8n.lead(input);
+      } catch (err) {
+        // One retry for transient failures. Not after a timeout: n8n may already have sent the email.
+        if (isTimeout(err)) throw err;
+        request.log.warn({ err, leadId: lead.id }, 'lead email failed, retrying once');
+        result = await n8n.lead(input);
+      }
       await updateLeadEmail(lead.id, 'sent', result.email_id, result.summary);
       emailStatus = 'sent';
       summary = result.summary;

@@ -6,7 +6,7 @@ import type { RouteDeps } from './sessions.js';
 export const healthRoutes: FastifyPluginAsync<RouteDeps> = async (app, { config }) => {
   // Exempt from rate limiting (container healthcheck + uptime monitors) and logged at warn+ only, so the
   // 10 s docker healthcheck does not flood the request log.
-  app.get('/api/health', { config: { rateLimit: false }, logLevel: 'warn' }, async () => {
+  app.get('/api/health', { config: { rateLimit: false }, logLevel: 'warn' }, async (_request, reply) => {
     let db: 'up' | 'down' = 'down';
     let activeDocument = false;
     try {
@@ -27,6 +27,8 @@ export const healthRoutes: FastifyPluginAsync<RouteDeps> = async (app, { config 
         n8n = 'down';
       }
     }
-    return { ok: true, db, n8n, activeDocument };
+    // 503 when the database is down, so the container healthcheck and uptime monitors see it.
+    const ok = db === 'up';
+    return reply.code(ok ? 200 : 503).send({ ok, db, n8n, activeDocument });
   });
 };

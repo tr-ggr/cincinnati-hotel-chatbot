@@ -7,6 +7,7 @@ import type { FastifyPluginAsync, FastifyReply } from 'fastify';
 import { PDFParse } from 'pdf-parse';
 import {
   activateDocument,
+  deleteChunksForDocument,
   failDocument,
   getActiveDocument,
   insertDocument,
@@ -122,33 +123,44 @@ export const adminRoutes: FastifyPluginAsync<RouteDeps> = async (app, { config, 
     }
 
     const row = await insertDocument({ id, filename, sizeBytes: upload.file.bytesRead, pageCount: parsed.pages });
+    emitStatsChanged();
+    logUpload('accepted', { documentId: id, sizeBytes: row.sizeBytes, pageCount: row.pageCount });
 
-    try {
-      const res = await n8n.ingest({
-        document_id: id,
-        filename,
-        file_url: `${config.internalBaseUrl}/internal/documents/${id}/file`,
-      });
-      const { document, previous } = await activateDocument(row.id, res.chunk_count);
-      if (previous) await rmQuiet(path.resolve(config.uploadDir, `${previous.id}.pdf`)).catch(() => undefined);
-      emitStatsChanged();
-      logUpload('ready', {
-        documentId: id,
-        sizeBytes: document.sizeBytes,
-        pageCount: document.pageCount,
-        chunkCount: document.chunkCount,
-        replacedDocumentId: previous?.id ?? null,
-      });
-      return { document: toDocumentInfo(document) };
-    } catch (err) {
-      request.log.error({ err }, 'ingest failed');
-      const message = err instanceof Error ? err.message : 'Ingestion failed';
-      await failDocument(id, message).catch(() => undefined);
-      await rmQuiet(file).catch(() => undefined);
-      emitStatsChanged();
-      logUpload('ingest_failed', { documentId: id });
-      return fail(reply, 502, 'INGEST_FAILED', 'Failed to process the document. Please try again.');
-    }
+    // Ingest runs in the background: embedding a long PDF can outlast the ~100 s Cloudflare allows a
+    // response to take. The dashboard follows it through `pendingDocument` on the stats stream.
+    const log = request.log;
+    void (async () => {
+      const ingestStarted = performance.now();
+      try {
+        const res = await n8n.ingest({
+          document_id: id,
+          filename,
+          file_url: `${config.internalBaseUrl}/internal/documents/${id}/file`,
+        });
+        const { document, previous } = await activateDocument(row.id, res.chunk_count);
+        if (previous) await rmQuiet(path.resolve(config.uploadDir, `${previous.id}.pdf`)).catch(() => undefined);
+        log.info(
+          {
+            event: 'ingest',
+            outcome: 'ready',
+            latencyMs: Math.round(performance.now() - ingestStarted),
+            documentId: id,
+            chunkCount: document.chunkCount,
+            replacedDocumentId: previous?.id ?? null,
+          },
+          'ingest ready',
+        );
+      } catch (err) {
+        log.error({ err, event: 'ingest', outcome: 'failed', documentId: id }, 'ingest failed');
+        await failDocument(id, 'Failed to process the document. Please try again.').catch(() => undefined);
+        await deleteChunksForDocument(id).catch(() => undefined);
+        await rmQuiet(file).catch(() => undefined);
+      } finally {
+        emitStatsChanged();
+      }
+    })();
+
+    return reply.code(202).send({ document: toDocumentInfo(row) });
   });
 
   app.get('/api/admin/stats', async () => getStats());

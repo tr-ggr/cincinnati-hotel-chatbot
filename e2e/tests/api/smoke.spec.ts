@@ -27,13 +27,28 @@ test('upload: sample PDF becomes the ready document', async ({ request }) => {
     multipart: {
       file: { name: 'cincinnati-hotel.pdf', mimeType: 'application/pdf', buffer: await readFile(SAMPLE_PDF) },
     },
-    timeout: 190_000,
   });
-  expect(res.status(), await res.text()).toBe(200);
-  const { document } = await res.json();
-  expect(document.status).toBe('ready');
-  if (mock) expect(document.chunkCount).toBe(42);
-  else expect(document.chunkCount).toBeGreaterThan(10);
+  // 202: validated and stored; ingest runs in the background and is reported through the stats.
+  expect(res.status(), await res.text()).toBe(202);
+  const { document: accepted } = await res.json();
+  expect(accepted.status).toBe('processing');
+
+  type Doc = { id: string; status: string; chunkCount: number | null };
+  const seen: { doc: Doc | null } = { doc: null };
+  await expect
+    .poll(
+      async () => {
+        const stats = await (await request.get('/api/admin/stats')).json();
+        expect(stats.pendingDocument?.status, stats.pendingDocument?.error ?? '').not.toBe('failed');
+        const doc = stats.activeDocument as Doc | null;
+        seen.doc = doc;
+        return doc && doc.id === accepted.id ? doc.status : 'processing';
+      },
+      { timeout: 190_000, intervals: [500, 1000, 2000] },
+    )
+    .toBe('ready');
+  if (mock) expect(seen.doc?.chunkCount).toBe(42);
+  else expect(seen.doc?.chunkCount).toBeGreaterThan(10);
 });
 
 test('chat: answerable and unanswerable questions', async ({ request }) => {
