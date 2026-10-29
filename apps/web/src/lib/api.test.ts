@@ -1,5 +1,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ApiError, createLead, createSession, getDocument, isApiError, sendMessage } from './api';
+import {
+  ApiError,
+  createLead,
+  createSession,
+  getDocument,
+  getHealth,
+  isApiError,
+  MAX_UPLOAD_BYTES,
+  sendMessage,
+  uploadDocument,
+} from './api';
 
 function stubFetch(response: Response | Error) {
   const fn = vi.fn(async () => {
@@ -67,5 +77,22 @@ describe('api client', () => {
   it('reports a non-JSON success body as BAD_RESPONSE', async () => {
     stubFetch(new Response('ok', { status: 200 }));
     await expect(createSession()).rejects.toMatchObject({ code: 'BAD_RESPONSE' });
+  });
+
+  it('returns the accepted (processing) document from a 202 upload', async () => {
+    const doc = { id: 'd1', filename: 'guide.pdf', status: 'processing' };
+    const fetch = stubFetch(json({ document: doc }, 202));
+    const file = new File(['%PDF-1.7'], 'guide.pdf', { type: 'application/pdf' });
+    await expect(uploadDocument(file)).resolves.toEqual(doc);
+    const [url, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe('/api/admin/document');
+    expect(init.method).toBe('POST');
+    expect((init.body as FormData).get('file')).toBeInstanceOf(File);
+    expect(MAX_UPLOAD_BYTES).toBe(10 * 1024 * 1024);
+  });
+
+  it('rejects a 503 health check so callers can treat it as unknown', async () => {
+    stubFetch(json({ ok: false, db: 'down', n8n: 'up', activeDocument: false }, 503));
+    await expect(getHealth()).rejects.toMatchObject({ status: 503 });
   });
 });

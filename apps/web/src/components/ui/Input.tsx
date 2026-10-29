@@ -1,7 +1,8 @@
-import type { InputHTMLAttributes } from 'react';
+import type { ComponentPropsWithRef } from 'react';
 import { cn } from '../../lib/cn';
 
-export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
+/** React 19: `ref` is a plain prop and is forwarded to the <input>. */
+export interface InputProps extends ComponentPropsWithRef<'input'> {
   invalid?: boolean;
 }
 

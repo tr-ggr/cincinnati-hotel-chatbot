@@ -72,12 +72,18 @@ export interface StatsSnapshot {
   totalQuestions: number;
   unansweredQuestions: number;
   totalLeads: number;
-  /** All 8 categories, zeros included, sorted desc by count. */
+  /** All 8 categories, zeros included, sorted desc by count (the UI re-orders them to CATEGORIES). */
   byCategory: CategoryCount[];
   activeDocument: DocumentInfo | null;
+  /**
+   * The newest upload that is not (yet) active: `status: 'processing'` while ingest runs, or `'failed'` (with
+   * `error`) when the latest upload failed. Null once that upload becomes `activeDocument`.
+   */
+  pendingDocument: DocumentInfo | null;
   generatedAt: string;
 }
 
+/** GET /api/health answers 503 with this same shape (ok: false) when the DB is down. */
 export interface Health {
   ok: boolean;
   db: 'up' | 'down';
@@ -171,7 +177,15 @@ export async function getDocument(): Promise<DocumentInfo | null> {
   return res.document;
 }
 
-/** Synchronous ingest (typically 10-30 s). Pass an AbortSignal to cancel. */
+/** Largest PDF the API accepts (POST /api/admin/document answers 413 FILE_TOO_LARGE above it). */
+export const MAX_UPLOAD_MB = 10;
+export const MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024;
+
+/**
+ * Validates and stores the PDF, then returns immediately (202) with `status: 'processing'`. Ingest runs in the
+ * background: watch `StatsSnapshot.pendingDocument` / `activeDocument` on the stats stream for the outcome.
+ * Rejects with 413 FILE_TOO_LARGE or 422 INVALID_PDF / EMPTY_PDF. Pass an AbortSignal to cancel the upload itself.
+ */
 export async function uploadDocument(file: File, opts: { signal?: AbortSignal } = {}): Promise<DocumentInfo> {
   const form = new FormData();
   form.append('file', file);

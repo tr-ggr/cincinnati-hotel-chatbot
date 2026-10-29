@@ -8,7 +8,6 @@ const SEGMENTS = 16;
 
 export interface CategoryChartProps {
   data: CategoryCount[] | null;
-  totalQuestions: number;
 }
 
 function BoardRow({ category, count, max }: { category: string; count: number; max: number }) {
@@ -39,13 +38,14 @@ function BoardRow({ category, count, max }: { category: string; count: number; m
   );
 }
 
-export function CategoryChart({ data, totalQuestions }: CategoryChartProps) {
+export function CategoryChart({ data }: CategoryChartProps) {
+  // Fixed CATEGORIES order (the API sends them sorted by count): rows never jump around as counts change.
   const rows: CategoryCount[] | null = data
-    ? CATEGORIES.map((category) => ({ category, count: data.find((d) => d.category === category)?.count ?? 0 })).sort(
-        (a, b) => b.count - a.count,
-      )
+    ? CATEGORIES.map((category) => ({ category, count: data.find((d) => d.category === category)?.count ?? 0 }))
     : null;
   const max = rows ? Math.max(0, ...rows.map((r) => r.count)) : 0;
+  // The summary is the sum of the rows shown, so the two can never disagree.
+  const total = rows ? rows.reduce((sum, r) => sum + r.count, 0) : 0;
 
   return (
     <section aria-labelledby="by-category" className="rounded-slat border border-rule bg-slat">
@@ -54,7 +54,11 @@ export function CategoryChart({ data, totalQuestions }: CategoryChartProps) {
           Questions by category
         </h2>
         <p className="text-sm text-dim">
-          {rows === null ? '\u00a0' : totalQuestions === 0 ? 'No questions yet. Rows light up as guests start chatting.' : `${totalQuestions.toLocaleString()} questions in total`}
+          {rows === null
+            ? '\u00a0'
+            : total === 0
+              ? 'No questions yet. Rows light up as guests start chatting.'
+              : `${total.toLocaleString()} ${total === 1 ? 'question' : 'questions'} in total`}
         </p>
       </div>
 

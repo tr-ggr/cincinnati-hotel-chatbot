@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatBytes, formatRelativeTime } from './format';
+import { formatBytes, formatClockTime, formatRelativeTime } from './format';
 
 describe('formatBytes', () => {
   it.each([
@@ -32,5 +32,16 @@ describe('formatRelativeTime', () => {
   it('falls back to a date after a week and to "-" for garbage', () => {
     expect(formatRelativeTime(ago(30 * 86_400_000), now)).not.toMatch(/ago$/);
     expect(formatRelativeTime('not a date', now)).toBe('-');
+  });
+});
+
+describe('formatClockTime', () => {
+  it('formats local time as zero-padded 24-hour HH:MM:SS', () => {
+    expect(formatClockTime(new Date(2026, 9, 29, 9, 5, 7).toISOString())).toBe('09:05:07');
+    expect(formatClockTime(new Date(2026, 9, 29, 23, 59, 0).toISOString())).toBe('23:59:00');
+  });
+
+  it('returns "-" for garbage', () => {
+    expect(formatClockTime('nope')).toBe('-');
   });
 });

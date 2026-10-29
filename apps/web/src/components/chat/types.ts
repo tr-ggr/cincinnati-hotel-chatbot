@@ -1,5 +1,7 @@
 import type { Category } from '../../lib/categories';
 
+export type { ContactOffer, LeadDetails, OfferState as FormState } from '../../lib/chat';
+
 export type SendStatus = 'sent' | 'sending' | 'failed';
 
 export interface ChatMessage {
@@ -17,9 +19,8 @@ export interface ChatMessage {
   failure?: 'no-document' | 'unavailable' | 'rate-limited';
 }
 
-export type FormState = 'open' | 'done' | 'dismissed';
-
-export interface ContactOffer {
-  question: string;
-  state: FormState;
+/** One screen-reader announcement; a fresh `id` re-announces identical text. */
+export interface Announcement {
+  id: number;
+  text: string;
 }

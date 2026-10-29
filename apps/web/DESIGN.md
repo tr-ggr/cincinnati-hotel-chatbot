@@ -325,7 +325,7 @@ The board's lettering. Each character is a flap cell: two leaves (top `#1d2126`,
 Four cells in one ruled panel, each with a muted Label, a Numeral flap value, and a dim sublabel line that reserves its height. A changed value riffles its digits and the cell flashes row-lit (a 16% signal wash fading over 1400ms). While loading, the value is a skeleton slat.
 
 ### Category Board
-Eight fixed rows (the category list), sorted by count. Each row has a name (flap ivory, or muted at zero), a 16-segment bar (lit segments are signal, unlit are slat-raised, 3px gaps, and any non-zero count lights at least one segment), and a three-cell flap count. Changed rows riffle and flash row-lit. A screen-reader-only table carries the same data.
+Eight fixed rows in the category list order, so rows never jump while they flash. Each row has a name (flap ivory, or muted at zero), a 16-segment bar (lit segments are signal, unlit are slat-raised, 3px gaps, and any non-zero count lights at least one segment), and a three-cell flap count. Changed rows riffle and flash row-lit. A screen-reader-only table carries the same data.
 
 ### Conversation
 - **Entry label:** A muted Label ("YOU" / "CONCIERGE") with the time in normal case. It is aligned with its entry.

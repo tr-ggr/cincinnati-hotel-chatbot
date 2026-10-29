@@ -3,16 +3,24 @@ import { RotateCcw, TriangleAlert } from 'lucide-react';
 import { BackLink, Button, FlapText } from '../components/ui';
 import {
   Composer,
+  failureCopy,
   MessageList,
   SuggestionChips,
+  type Announcement,
   type ChatMessage,
   type ContactOffer,
-  type FormState,
+  type LeadDetails,
 } from '../components/chat';
 import {
+  clearChatState,
+  createLead,
   createSession,
+  getHealth,
   getSession,
   isApiError,
+  loadChatState,
+  markdownToSpeech,
+  saveChatState,
   sendMessage,
   SUGGESTIONS,
   useDocumentTitle,
@@ -28,7 +36,9 @@ const WELCOME: ChatMessage = {
   category: null,
   answered: null,
 };
-const NO_DOC_MESSAGE = "The knowledge base hasn't been uploaded yet. Please ask an admin.";
+const UNAVAILABLE_MESSAGE = "Our concierge isn't available yet. Please try again shortly.";
+/** While the concierge is unavailable, quietly re-check so the banner clears on its own. */
+const HEALTH_RECHECK_MS = 15_000;
 
 function readStored(): string | null {
   try {
@@ -61,20 +71,62 @@ function fromServer(m: Message): ChatMessage {
 
 let localCounter = 0;
 const localKey = () => `local-${Date.now()}-${localCounter++}`;
+let announceCounter = 0;
 
 export default function Chat() {
   useDocumentTitle('Chat');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [offers, setOffers] = useState<Record<string, ContactOffer>>({});
+  /** Contact details saved by a lead in this session; later unanswered questions reuse them. */
+  const [lead, setLead] = useState<LeadDetails | null>(null);
   const [pending, setPending] = useState(false);
   const [booting, setBooting] = useState(true);
   const [bootError, setBootError] = useState<string | null>(null);
-  const [noDocument, setNoDocument] = useState(false);
+  /** From GET /api/health: true / false, or null while unknown (a failed check never blocks the guest). */
+  const [docAvailable, setDocAvailable] = useState<boolean | null>(null);
+  const [announcement, setAnnouncement] = useState<Announcement | null>(null);
+  const [refocusOnReply, setRefocusOnReply] = useState(true);
 
   const sessionIdRef = useRef<string | null>(null);
   const bootPromise = useRef<Promise<string> | null>(null);
   const pendingRef = useRef(false);
+
+  const announce = useCallback((text: string) => {
+    setAnnouncement({ id: ++announceCounter, text });
+  }, []);
+
+  /** Resolves to whether a guide is live, or null when health could not be read (network / 503). */
+  const checkHealth = useCallback(async (): Promise<boolean | null> => {
+    try {
+      const h = await getHealth();
+      setDocAvailable(h.activeDocument);
+      return h.activeDocument;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    getHealth().then(
+      (h) => {
+        if (active) setDocAvailable(h.activeDocument);
+      },
+      () => {
+        // unknown: don't block the guest
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (docAvailable !== false) return;
+    const t = setInterval(() => void checkHealth(), HEALTH_RECHECK_MS);
+    return () => clearInterval(t);
+  }, [docAvailable, checkHealth]);
 
   const adoptSession = useCallback((id: string) => {
     sessionIdRef.current = id;
@@ -91,11 +143,15 @@ export default function Chat() {
       if (stored) {
         try {
           const s = await getSession(stored);
+          const saved = loadChatState(s.id);
           setMessages(s.messages.map(fromServer));
+          setOffers(saved.offers);
+          setLead(saved.lead);
           adoptSession(s.id);
           return s.id;
         } catch (e) {
           if (!(isApiError(e) && e.status === 404)) throw e;
+          clearChatState(stored);
           writeStored(null);
         }
       }
@@ -117,7 +173,6 @@ export default function Chat() {
 
   useEffect(() => {
     let active = true;
-    setBooting(true);
     ensureSession()
       .then(() => {
         if (active) setBootError(null);
@@ -133,6 +188,11 @@ export default function Chat() {
       active = false;
     };
   }, [ensureSession]);
+
+  // Keep pending contact-form offers (and saved details) across a refresh of this tab.
+  useEffect(() => {
+    if (sessionId) saveChatState(sessionId, { offers, lead });
+  }, [sessionId, offers, lead]);
 
   const patchMessage = useCallback((key: string, patch: Partial<ChatMessage>) => {
     setMessages((prev) => prev.map((m) => (m.key === key ? { ...m, ...patch } : m)));
@@ -158,29 +218,30 @@ export default function Chat() {
         }
         const user = fromServer(res.userMessage);
         const assistant = fromServer(res.assistantMessage);
-        setMessages((prev) => [
-          ...prev.map((m) => (m.key === key ? { ...user, key } : m)),
-          assistant,
-        ]);
+        setMessages((prev) => [...prev.map((m) => (m.key === key ? { ...user, key } : m)), assistant]);
         if (res.offerContactForm) {
           setOffers((prev) => ({ ...prev, [assistant.key]: { question: content, state: 'open' } }));
         }
-        setNoDocument(false);
+        setRefocusOnReply(!res.offerContactForm);
+        setDocAvailable(true);
+        announce(`Concierge: ${markdownToSpeech(assistant.content)}`);
       } catch (e) {
-        if (isApiError(e) && e.code === 'NO_DOCUMENT') {
-          setNoDocument(true);
-          patchMessage(key, { status: 'failed', failure: 'no-document' });
-        } else if (isApiError(e) && e.code === 'RATE_LIMITED') {
-          patchMessage(key, { status: 'failed', failure: 'rate-limited' });
-        } else {
-          patchMessage(key, { status: 'failed', failure: 'unavailable' });
-        }
+        const failure: ChatMessage['failure'] =
+          isApiError(e) && e.code === 'NO_DOCUMENT'
+            ? 'no-document'
+            : isApiError(e) && e.code === 'RATE_LIMITED'
+              ? 'rate-limited'
+              : 'unavailable';
+        if (failure === 'no-document') setDocAvailable(false);
+        patchMessage(key, { status: 'failed', failure });
+        setRefocusOnReply(true);
+        announce(failureCopy(failure));
       } finally {
         pendingRef.current = false;
         setPending(false);
       }
     },
-    [ensureSession, patchMessage],
+    [announce, ensureSession, patchMessage],
   );
 
   const handleSend = useCallback(
@@ -197,35 +258,72 @@ export default function Chat() {
   );
 
   const handleRetry = useCallback(
-    (m: ChatMessage) => {
+    async (m: ChatMessage) => {
       if (pendingRef.current) return;
+      if (m.failure === 'no-document') {
+        // Re-check first so a still-missing guide doesn't cost a round trip through the assistant.
+        pendingRef.current = true;
+        patchMessage(m.key, { status: 'sending', failure: undefined });
+        const available = await checkHealth();
+        pendingRef.current = false;
+        if (available === false) {
+          patchMessage(m.key, { status: 'failed', failure: 'no-document' });
+          announce(UNAVAILABLE_MESSAGE);
+          return;
+        }
+      }
       void deliver(m.key, m.content);
     },
-    [deliver],
+    [announce, checkHealth, deliver, patchMessage],
   );
 
-  const handleOfferChange = useCallback((key: string, state: FormState) => {
-    setOffers((prev) => (prev[key] ? { ...prev, [key]: { ...prev[key], state } } : prev));
+  const handleLeadSubmit = useCallback(
+    async (key: string, details?: LeadDetails) => {
+      const who = details ?? lead;
+      const sid = sessionIdRef.current;
+      if (!who || !sid) throw new Error('Something went wrong. Please try again.');
+      const res = await createLead({ sessionId: sid, ...who, unansweredQuestion: offers[key]?.question });
+      setLead(who);
+      setOffers((prev) => {
+        const offer = prev[key];
+        if (!offer) return prev;
+        const next: ContactOffer = { question: offer.question, state: 'done' };
+        if (res.emailStatus === 'failed') next.emailFailed = true;
+        return { ...prev, [key]: next };
+      });
+    },
+    [lead, offers],
+  );
+
+  const handleOfferDismiss = useCallback((key: string) => {
+    setOffers((prev) => {
+      const offer = prev[key];
+      return offer ? { ...prev, [key]: { ...offer, state: 'dismissed' } } : prev;
+    });
   }, []);
 
   const handleNewConversation = useCallback(() => {
+    if (sessionIdRef.current) clearChatState(sessionIdRef.current);
     writeStored(null);
     sessionIdRef.current = null;
     bootPromise.current = null;
     setSessionId(null);
     setMessages([]);
     setOffers({});
-    setNoDocument(false);
+    setLead(null);
+    setAnnouncement(null);
     setBootError(null);
     setBooting(true);
+    void checkHealth();
     ensureSession()
       .catch((e) => setBootError(isApiError(e) ? e.message : 'Could not start a conversation.'))
       .finally(() => setBooting(false));
-  }, [ensureSession]);
+  }, [checkHealth, ensureSession]);
 
   const hasUserMessages = messages.some((m) => m.role === 'user');
   const display = useMemo(() => [WELCOME, ...messages], [messages]);
-  const composerDisabled = pending || booting || !!bootError;
+  const unavailable = docAvailable === false;
+  const composerDisabled = booting || !!bootError || unavailable;
 
   return (
     <div className="flex h-dvh flex-col">
@@ -255,11 +353,11 @@ export default function Chat() {
         </div>
       </header>
 
-      {noDocument && (
+      {unavailable && (
         <div role="alert" className="bg-signal px-4 py-2.5 text-sm font-semibold text-board">
           <div className="mx-auto flex max-w-[760px] items-center gap-2 sm:px-2">
             <TriangleAlert className="size-4 shrink-0" aria-hidden="true" />
-            {NO_DOC_MESSAGE}
+            {UNAVAILABLE_MESSAGE}
           </div>
         </div>
       )}
@@ -280,10 +378,13 @@ export default function Chat() {
         pending={pending}
         sessionId={sessionId}
         offers={offers}
-        onOfferChange={handleOfferChange}
-        onRetry={handleRetry}
+        savedLead={lead}
+        onLeadSubmit={handleLeadSubmit}
+        onOfferDismiss={handleOfferDismiss}
+        onRetry={(m) => void handleRetry(m)}
+        announcement={announcement}
         footer={
-          !hasUserMessages && !booting && !bootError ? (
+          !hasUserMessages && !booting && !bootError && !unavailable ? (
             <SuggestionChips suggestions={SUGGESTIONS} onPick={handleSend} disabled={pending} />
           ) : null
         }
@@ -291,7 +392,7 @@ export default function Chat() {
 
       <div className="border-t border-rule bg-slat pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3">
         <div className="mx-auto w-full max-w-[760px] px-4 sm:px-6">
-          <Composer onSend={handleSend} disabled={composerDisabled} />
+          <Composer onSend={handleSend} disabled={composerDisabled} busy={pending} refocusOnReply={refocusOnReply} />
         </div>
       </div>
     </div>

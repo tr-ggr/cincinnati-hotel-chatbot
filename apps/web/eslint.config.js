@@ -17,6 +17,8 @@ export default tseslint.config(
     },
     rules: {
       ...reactHooks.configs.recommended.rules,
+      // `({ node: _node, ...props })` strips react-markdown's hast node before spreading props onto DOM elements.
+      '@typescript-eslint/no-unused-vars': ['error', { ignoreRestSiblings: true, argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
     },
   },
   {

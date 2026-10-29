@@ -26,3 +26,11 @@ export function formatRelativeTime(iso: string, now: number = Date.now()): strin
   if (day < 7) return plural(day, 'day');
   return new Date(t).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 }
+
+/** Local wall-clock time as "HH:MM:SS" (24-hour), or "-" for garbage. */
+export function formatClockTime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '-';
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}

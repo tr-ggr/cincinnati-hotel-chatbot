@@ -1,33 +1,26 @@
-import { useCallback, useEffect, useState } from 'react';
-import { getDocument, useDocumentTitle, useStatsStream, type DocumentInfo } from '../lib';
+import { useEffect, useState } from 'react';
+import { formatClockTime, getDocument, useDocumentTitle, useStatsStream, type DocumentInfo } from '../lib';
 import { CategoryChart, StatCard, UploadCard } from '../components/admin';
 import { BackLink, FlapText } from '../components/ui';
 
 export default function Admin() {
   useDocumentTitle('Admin');
   const { stats, mode, error, refresh } = useStatsStream();
-  const [doc, setDoc] = useState<DocumentInfo | null | undefined>(undefined);
+  // Fallback for the knowledge-base card if the stats snapshot never arrives; snapshots win once they do.
+  const [fetchedDoc, setFetchedDoc] = useState<DocumentInfo | null | undefined>(undefined);
 
-  const refreshDoc = useCallback(async () => {
-    try {
-      setDoc(await getDocument());
-    } catch {
-      setDoc((d) => (d === undefined ? null : d));
-    }
+  useEffect(() => {
+    let active = true;
+    getDocument().then(
+      (d) => active && setFetchedDoc(d),
+      () => active && setFetchedDoc((d) => (d === undefined ? null : d)),
+    );
+    return () => {
+      active = false;
+    };
   }, []);
 
-  useEffect(() => {
-    void refreshDoc();
-  }, [refreshDoc]);
-
-  // Keep the document card in sync with pushed snapshots.
-  useEffect(() => {
-    if (stats) setDoc(stats.activeDocument);
-  }, [stats]);
-
-  const onUploaded = useCallback(async () => {
-    await Promise.all([refreshDoc(), refresh()]);
-  }, [refreshDoc, refresh]);
+  const activeDocument = stats ? stats.activeDocument : fetchedDoc;
 
   const unansweredShare =
     stats && stats.totalQuestions > 0
@@ -46,11 +39,18 @@ export default function Admin() {
             <p className="mt-1.5 text-sm text-dim">Cincinnati Hotel · guest questions as they arrive</p>
           </div>
         </div>
-        {mode === 'polling' && (
-          <p role="status" className="text-sm text-dim">
-            Live updates paused, refreshing every 10&nbsp;s
-          </p>
-        )}
+        <div className="flex flex-col items-start gap-1 text-sm sm:items-end">
+          {mode === 'polling' && (
+            <p role="status" className="text-dim">
+              Live updates paused, refreshing every 10&nbsp;s
+            </p>
+          )}
+          {stats && (
+            <p className="text-muted tabular-nums">
+              Updated <time dateTime={stats.generatedAt}>{formatClockTime(stats.generatedAt)}</time>
+            </p>
+          )}
+        </div>
       </header>
 
       {error && !stats && (
@@ -70,8 +70,12 @@ export default function Admin() {
       </section>
 
       <div className="mt-6 grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)]">
-        <CategoryChart data={stats?.byCategory ?? null} totalQuestions={stats?.totalQuestions ?? 0} />
-        <UploadCard document={doc} onUploaded={onUploaded} />
+        <CategoryChart data={stats?.byCategory ?? null} />
+        <UploadCard
+          activeDocument={activeDocument}
+          pendingDocument={stats?.pendingDocument ?? null}
+          onUploaded={refresh}
+        />
       </div>
     </main>
   );

@@ -25,7 +25,7 @@ Not a general assistant: the knowledge base is one document the hotel controls. 
 ## Operating Context
 - Landing page offers two roles as simple buttons labelled exactly **"Admin"** and **"Regular User"** (task requirement).
 - No authentication; roles are a demo of both experiences.
-- Admin: upload a PDF (max 25 MB, replaces the previous one), see total chat sessions, questions asked, unanswered,
+- Admin: upload a PDF (max 10 MB, replaces the previous one once it is ready), see total chat sessions, questions asked, unanswered,
   leads, and questions per category; stats update in real time over SSE (polling fallback).
 - Guest chat: suggested questions, markdown answers, typing state, retry on failure, contact form (Name, Phone, Email).
 
@@ -33,7 +33,7 @@ Not a general assistant: the knowledge base is one document the hotel controls. 
 - Categories (fixed, 8): Rooms, Restaurant & Dining, Amenities & Facilities, Pricing & Booking, Location & Transport,
   Policies, Events, Other.
 - Canned fallback sentence, exact: `I'm sorry, I don't have that information right now.`
-- UI dependencies stay light: Tailwind v4, lucide-react, recharts, react-markdown, clsx. No component kits or state libraries.
+- UI dependencies stay light: Tailwind v4, lucide-react, react-markdown (+ remark-gfm), clsx. No component kits or state libraries.
 - Accessible names used by e2e tests must stay (see repo `e2e/tests/ui`).
 
 ## Brand Commitments
